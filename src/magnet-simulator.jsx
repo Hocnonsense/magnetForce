@@ -5,14 +5,14 @@ import BuckyBall, { ThreeAdd, ThreeLength, ThreeNormalize } from './magnet-ball'
 // Physical constants for NdFeB N35
 const MAGNET_RADIUS = 0.0025; // 5mm diameter
 const BR = 1.2; // Tesla
-const BUCKYBALL = new BuckyBall(MAGNET_RADIUS, BR, 50);
-
+const BUCKYBALL = new BuckyBall(MAGNET_RADIUS, BR, 200);
 // Simulation constants
 const VISUAL_SCALE = 100; // Scale factor for rendering positions
 const COLLISION_DIST = MAGNET_RADIUS * 2 * 1.00; // Minimum distance between centers
 const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
-const MASS = 0.5e-6; // ~0.5g per magnet ball
+const MASS = 0.5e-3; // ~0.5g per magnet ball
 const DAMPING = 0.3; // Velocity damping per frame
+const thermalNoise = 1e-6;
 
 // Calculate net forces and torques on all magnets
 function calcAllForcesAndTorques(magnets) {
@@ -54,7 +54,7 @@ function resolveCollisions(magnets) {
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
       if (dist < COLLISION_DIST) {
-        console.warn(`Collision detected between magnet ${newMagnets[i].id} and ${newMagnets[j].id}`);
+        console.warn(`Collision detected between magnet ${newMagnets[i].id} and ${newMagnets[j].id}: dist=${(COLLISION_DIST - dist) * 1000}mm`);
         // Normalize direction
         const nx = dx / dist;
         const ny = dy / dist;
@@ -96,14 +96,26 @@ function resolveCollisions(magnets) {
 }
 
 // Rotate moment vector by torque
-function applyTorque(m, torque, speed, angularDamping) {
-  const torqueMag = ThreeLength(torque);
-  if (torqueMag < 1e-20) return m;
+function applyTorque(m, omega, torque, dt) {
+  const I = 0.4 * MASS * (MAGNET_RADIUS ** 2);
+  const alpha = torque.map(t => t / I); // 角加速度
+  // 更新角速度: ω_new = (ω + α*dt) * damping
+  // 检测是否在减速（力矩与角速度反向）
 
-  // Simplified rotation: rotate m towards the torque direction
-  const angle = torqueMag * speed * angularDamping; // Scale factor for visible rotation
-  // Cross product gives rotation axis
-  const axis = [torque[0] / torqueMag, torque[1] / torqueMag, torque[2] / torqueMag];
+  const torqueDotOmega = torque[0] * omega[0] + torque[1] * omega[1] + torque[2] * omega[2];
+  const isDecelerating = torqueDotOmega < 0;
+  // 减速时用更强阻尼，加速时用弱阻尼
+  const ANGULAR_DAMPING = isDecelerating ? DAMPING : 1;
+  const newOmega = [
+    omega[0] * ANGULAR_DAMPING + alpha[0] * dt,
+    omega[1] * ANGULAR_DAMPING + alpha[1] * dt,
+    omega[2] * ANGULAR_DAMPING + alpha[2] * dt
+  ];
+  const omegaMag = ThreeLength(newOmega);  // 旋转角度 = ω * dt
+  if (omegaMag < 1e-20) return { m, omega: newOmega };
+
+  const angle = Math.min(omegaMag, 10) * dt;
+  const axis = newOmega.map(w => w / omegaMag);
 
   // Rodrigues rotation formula
   const cosA = Math.cos(angle);
@@ -120,18 +132,22 @@ function applyTorque(m, torque, speed, angularDamping) {
     m[1] * cosA + cross[1] * sinA + axis[1] * dot * (1 - cosA),
     m[2] * cosA + cross[2] * sinA + axis[2] * dot * (1 - cosA)
   ];
-
-  // Normalize
-  const len = Math.sqrt(newM[0] ** 2 + newM[1] ** 2 + newM[2] ** 2);
-  return [newM[0] / len, newM[1] / len, newM[2] / len];
+  const len = ThreeLength(newM);
+  console.log(`dt=${dt}, angle=${angle}, torque=${torque}, m=${m}, newM=${newM}, omega=${omega}, newOmega=${newOmega}`);
+  return { m: [newM[0] / len, newM[1] / len, newM[2] / len], omega: newOmega };
 }
 
 // Presets
 const PRESETS = {
+  pair: () => [
+    { id: 0, pos: [-0.0025, 0, 0], vel: [0, 0, 0], omega: [0, 0, 0], m: [1, 0, 0], color: 0xff4444 },
+    { id: 1, pos: [0.0025, 0, 0], vel: [0, 0, 0], omega: [0, 0, 0], m: [1, 0, 0], color: 0x4444ff }
+  ],
   chain: () => Array.from({ length: 5 }, (_, i) => ({
     id: i,
     pos: [(i - 2) * MAGNET_RADIUS * 2 * 1.1, 0, 0],
     vel: [0, 0, 0],
+    omega: [0, 0, 0],
     m: [1, 0, 0],
     color: i % 2 ? 0x4444ff : 0xff4444
   })),
@@ -142,14 +158,11 @@ const PRESETS = {
       id: i,
       pos: [ringRadius * Math.cos(a), ringRadius * Math.sin(a), 0],
       vel: [0, 0, 0],
+      omega: [0, 0, 0],
       m: [Math.cos(a + Math.PI / 2), Math.sin(a + Math.PI / 2), 0],
       color: i % 2 ? 0x4444ff : 0xff4444
     };
   }),
-  pair: () => [
-    { id: 0, pos: [-MAGNET_RADIUS * 2 * 0.6, 0, 0], vel: [0, 0, 0], m: [1, 0, 0], color: 0xff4444 },
-    { id: 1, pos: [MAGNET_RADIUS * 2 * 0.6, 0, 0], vel: [0, 0, 0], m: [1, 0, 0], color: 0x4444ff }
-  ],
   random: () => Array.from({ length: 8 }, (_, i) => ({
     id: i,
     pos: [
@@ -158,6 +171,7 @@ const PRESETS = {
       (Math.random() - 0.5) * MAGNET_RADIUS * 2 * 4
     ],
     vel: [0, 0, 0],
+    omega: [0, 0, 0],
     m: ThreeNormalize([Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5]),
     color: i % 2 ? 0x4444ff : 0xff4444
   })),
@@ -171,6 +185,7 @@ const PRESETS = {
       id: i,
       pos: p.map(x => x * halfSize),
       vel: [0, 0, 0],
+      omega: [0, 0, 0],
       m: [0, 0, i < 4 ? 1 : -1],
       color: i < 4 ? 0xff4444 : 0x4444ff
     }));
@@ -178,11 +193,16 @@ const PRESETS = {
 };
 
 export default function MagnetSimulator() {
+  // const res = new BuckyBall(MAGNET_RADIUS, BR, 200).calcForceAndTorque(
+  //   [-0.0025, 0, 0], [1, 0, 0], [0.0025, 0, 0], [1, 0, 0]
+  // )
+  // console.log('Force and Torque between two magnets:', res);
+
   const containerRef = useRef(null);
-  const [magnets, setMagnets] = useState(PRESETS.chain());
+  const [magnets, setMagnets] = useState(PRESETS.pair());
   const [selectedId, setSelectedId] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
-  const [simSpeed, setSimSpeed] = useState(0.0001);
+  const [simSpeed, setSimSpeed] = useState(0.00002);
   const [rotateMoments, setRotateMoments] = useState(true);
   const [showVectors, setShowVectors] = useState(true);
 
@@ -227,7 +247,6 @@ export default function MagnetSimulator() {
         (mag.vel[2] + az * speed) * DAMPING
       ];
 
-      console.log(`Magnet ${mag.id}  vel: [${newVel[0]}, ${newVel[1]}, ${newVel[2]}] m/s,  delta: [${newVel[0] * speed}, ${newVel[1] * speed}, ${newVel[2] * speed}] m/s`);
       // Update position
       const newPos = [
         mag.pos[0] + newVel[0] * speed,
@@ -236,9 +255,10 @@ export default function MagnetSimulator() {
       ];
 
       // Update moment direction if enabled
-      const newM = rotate ? applyTorque(mag.m, t, speed, 1e10 * 0.5) : mag.m;
+      const newM = rotate ? applyTorque(mag.m, mag.omega, t, speed) : { m: mag.m, omega: mag.omega };
+      const deltaM = [newM.m[0] - mag.m[0], newM.m[1] - mag.m[1], newM.m[2] - mag.m[2]];
 
-      return { ...mag, pos: newPos, vel: newVel, m: newM };
+      return { ...mag, pos: newPos, vel: newVel, m: newM.m, omega: newM.omega, f: f, tau: t, deltaM: deltaM };
     });
 
     // Resolve collisions
@@ -343,7 +363,7 @@ export default function MagnetSimulator() {
 
     // Calculate forces and torques for visualization
     const { forces, torques } = magnets.length > 1
-      ? calcAllForcesAndTorques(magnets)
+      ? { forces: magnets.map((mag) => mag.f), torques: magnets.map((mag) => mag.tau) }
       : { forces: [], torques: [] };
 
     magnets.forEach((mag, idx) => {
@@ -364,7 +384,7 @@ export default function MagnetSimulator() {
 
       if (showVectors) {
         // Moment arrow - 长度约为直径的1.2倍
-        const arrowLength = VISUAL_RADIUS * 2.4;  // = 0.6
+        const arrowLength = VISUAL_RADIUS * 3.6;  // = 0.6
         const arrowHeadLength = VISUAL_RADIUS * 0.5;
         const arrowHeadWidth = VISUAL_RADIUS * 0.3;
 
@@ -380,26 +400,23 @@ export default function MagnetSimulator() {
         scene.add(arrow);
         arrowsRef.current.push(arrow);
 
-        if (isSimulating) {
-          // Force arrow
-          if (forces[idx]) {
-            const f = forces[idx];
-            const fMag = ThreeLength(f);
+        if (forces[idx]) {
+          const f = forces[idx];
+          const fMag = ThreeLength(f);
 
-            if (fMag > 1e-25) {
-              const fDir = new THREE.Vector3(...f).normalize();
-              // 基于力的大小，范围 0.5R ~ 6R
-              const fLen = VISUAL_RADIUS * Math.min(6, Math.max(0.5, Math.log10(fMag + 1e-10) + 10));
-              const fArrow = new THREE.ArrowHelper(
-                fDir, origin,
-                fLen,
-                0x00ffff,
-                VISUAL_RADIUS * 0.4,
-                VISUAL_RADIUS * 0.24
-              );
-              scene.add(fArrow);
-              forceArrowsRef.current.push(fArrow);
-            }
+          if (fMag > 1e-25) {
+            const fDir = new THREE.Vector3(...f).normalize();
+            // 基于力的大小，范围 0.5R ~ 6R
+            const fLen = VISUAL_RADIUS * Math.min(6, Math.max(0.5, Math.log10(fMag + 1e-10) + 10));
+            const fArrow = new THREE.ArrowHelper(
+              fDir, origin,
+              fLen,
+              0x00ffff,
+              VISUAL_RADIUS * 0.4,
+              VISUAL_RADIUS * 0.24
+            );
+            scene.add(fArrow);
+            forceArrowsRef.current.push(fArrow);
           }
 
           // Torque arrow
@@ -492,7 +509,7 @@ export default function MagnetSimulator() {
   };
 
   const resetVelocities = () => {
-    setMagnets(prev => prev.map(m => ({ ...m, vel: [0, 0, 0] })));
+    setMagnets(prev => prev.map(m => ({ ...m, vel: [0, 0, 0], omega: [0, 0, 0] })));
   };
 
   return (
@@ -577,11 +594,15 @@ export default function MagnetSimulator() {
             </div>
             <input
               type="range"
-              min="0.0000001"
-              max="0.00001"
-              step="0.0000001"
-              value={simSpeed}
-              onChange={e => setSimSpeed(parseFloat(e.target.value))}
+              min="-6"      // 10⁻⁶ = 0.000001
+              max="0"       // 10⁰ = 1.0（修正：允许全速模拟）
+              step="0.1"
+              value={Math.log10(simSpeed)} // ✅ 滑块位置 = 当前速度的对数值
+              onChange={e => {
+                const logVal = parseFloat(e.target.value);
+                const clampedLog = Math.max(-6, Math.min(0, logVal));
+                setSimSpeed(Math.pow(10, clampedLog)); // ✅ 对数 → 线性转换
+              }}
               style={{ width: '100%', accentColor: '#4488ff' }}
             />
           </div>
@@ -664,6 +685,14 @@ export default function MagnetSimulator() {
               <button onClick={() => rotateMoment('y')} style={smallBtnStyle}>绕Y</button>
               <button onClick={() => rotateMoment('z')} style={smallBtnStyle}>绕Z</button>
             </div>
+
+            <div style={{ fontSize: '11px', color: '#666', marginBottom: '6px' }}>当前状态:</div>
+            <div style={{ fontSize: '10px', color: '#aaa' }}>位置: {magnets.find(m => m.id === selectedId)?.pos.join(', ')}</div>
+            <div style={{ fontSize: '10px', color: '#aaa' }}>速度: {magnets.find(m => m.id === selectedId)?.vel.join(', ')}</div>
+            <div style={{ fontSize: '10px', color: '#aaa' }}>磁矩: {magnets.find(m => m.id === selectedId)?.m.join(', ')}</div>
+            <div style={{ fontSize: '10px', color: '#aaa' }}>受力: {magnets.find(m => m.id === selectedId)?.f.join(', ')}</div>
+            <div style={{ fontSize: '10px', color: '#aaa' }}>磁轴力矩: {magnets.find(m => m.id === selectedId)?.tau.join(', ')}</div>
+            <div style={{ fontSize: '10px', color: '#aaa' }}>磁矩偏转量: {magnets.find(m => m.id === selectedId)?.deltaM.join(', ')}</div>
           </div>
         )}
 
