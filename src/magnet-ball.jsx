@@ -1,3 +1,5 @@
+import * as Three from "./three";
+
 // ============================================
 // 物理常数
 // ============================================
@@ -32,39 +34,6 @@ function fibonacciSphere4(n) {
     return points;
 }
 
-export function ThreeAdd(v1, v2) {
-    return [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]];
-}
-
-function ThreeDistanceTo(v1, v2) {
-    return [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]];
-}
-
-export function ThreeLength(v) {
-    return Math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2);
-}
-
-function ThreeMultiplyScalar(v, scalar) {
-    return [v[0] * scalar, v[1] * scalar, v[2] * scalar];
-}
-
-export function ThreeNormalize(v) {
-    const len = ThreeLength(v);
-    return ThreeMultiplyScalar(v, 1 / len);
-}
-
-function ThreeDot(v1, v2) {
-    return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
-}
-
-function ThreeCross(v1, v2) {
-    return [
-        v1[1] * v2[2] - v1[2] * v2[1],
-        v1[2] * v2[0] - v1[0] * v2[2],
-        v1[0] * v2[1] - v1[1] * v2[0]
-    ];
-}
-
 export default class BuckyBall {
     constructor(radius_m = 2.5e-3, br = 1.2, n_samples = 50) {
         this.radius = radius_m;
@@ -81,17 +50,17 @@ export default class BuckyBall {
 
     rotateSphereSamples = (dir) => {
         const up = [0, 1, 0];
-        const cosTheta = ThreeDot(up, dir); // 防浮点溢出
+        const cosTheta = Three.Dot(up, dir); // 防浮点溢出
         const sinTheta2 = 1 - cosTheta * cosTheta;
         // ✅ 情况1: 完全对齐 (无需旋转)
         if (sinTheta2 < 1e-9) return cosTheta > 0 ? this.sphere_samples : this.sphere_samples.map(p => [-p[0], -p[1], -p[2]]);
         // 计算旋转轴: up × dir = [dir[2], 0, -dir[0]] (因up=[0,1,0])
         const sinTheta = Math.sqrt(sinTheta2);
-        const axis = ThreeNormalize([dir[2], 0, -dir[0]]);
+        const axis = Three.Normalize([dir[2], 0, -dir[0]]);
         // 对每个采样点独立应用旋转 (关键修复: 循环内计算每个点的叉积/点积)
         return this.sphere_samples.map(p => {
-            const axisDotP = ThreeDot(axis, p);
-            const cross = ThreeCross(axis, p);
+            const axisDotP = Three.Dot(axis, p);
+            const cross = Three.Cross(axis, p);
             return [
                 p[0] * cosTheta + cross[0] * sinTheta + axis[0] * axisDotP * (1 - cosTheta),
                 p[1] * cosTheta + cross[1] * sinTheta + axis[1] * axisDotP * (1 - cosTheta),
@@ -107,14 +76,14 @@ export default class BuckyBall {
         const R = this.radius;
         const minDist = R / this.n_samples;
 
-        const d = ThreeDistanceTo(c1, c2);
-        const dir1 = ThreeNormalize(m1);
-        const dir2 = ThreeNormalize(m2);
+        const d = Three.DistanceTo(c1, c2);
+        const dir1 = Three.Normalize(m1);
+        const dir2 = Three.Normalize(m2);
 
         // 表面点位置
-        const r1_arr = this.rotateSphereSamples(dir1).map(n => ThreeMultiplyScalar(n, R));
-        const r2_arr = this.rotateSphereSamples(dir2).map(n => ThreeMultiplyScalar(n, R));
-        const r2d_arr = r2_arr.map(n => ThreeAdd(n, d)); // 球2表面点相对于球1中心的向量
+        const r1_arr = this.rotateSphereSamples(dir1).map(n => Three.MultiplyScalar(n, R));
+        const r2_arr = this.rotateSphereSamples(dir2).map(n => Three.MultiplyScalar(n, R));
+        const r2d_arr = r2_arr.map(n => Three.Add(n, d)); // 球2表面点相对于球1中心的向量
 
         let F2 = [0, 0, 0];
         let tau1 = [0, 0, 0];
@@ -126,19 +95,19 @@ export default class BuckyBall {
             const q1 = this.sample_q[i];
             for (let j = 0; j < this.n_samples; j++) {
                 const r2 = r2d_arr[j];
-                const rd = ThreeDistanceTo(r1, r2);
-                const dist = Math.max(ThreeLength(rd), minDist);
+                const rd = Three.DistanceTo(r1, r2);
+                const dist = Math.max(Three.Length(rd), minDist);
                 const q2 = this.sample_q[j];
                 const forceMag = prefactor * q1 * q2 / (dist ** 2);
-                const f = ThreeMultiplyScalar(rd, forceMag / dist);
-                F2 = ThreeAdd(F2, f);
-                tau2 = ThreeAdd(tau2, ThreeCross(r2_arr[j], f));
-                tau1 = ThreeAdd(tau1, ThreeCross(r1, ThreeMultiplyScalar(f, -1)));
+                const f = Three.MultiplyScalar(rd, forceMag / dist);
+                F2 = Three.Add(F2, f);
+                tau2 = Three.Add(tau2, Three.Cross(r2_arr[j], f));
+                tau1 = Three.Add(tau1, Three.Cross(r1, Three.MultiplyScalar(f, -1)));
             }
         }
 
         return {
-            force1: ThreeMultiplyScalar(F2, -1),
+            force1: Three.MultiplyScalar(F2, -1),
             force2: F2,
             torque1: tau1,
             torque2: tau2

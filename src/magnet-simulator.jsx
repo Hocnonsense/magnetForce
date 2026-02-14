@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import BuckyBall, { ThreeAdd, ThreeLength, ThreeNormalize } from './magnet-ball';
+import * as Three from './three';
+import BuckyBall from './magnet-ball';
 
 // Physical constants for NdFeB N35
 const MAGNET_RADIUS = 0.0025; // 5mm diameter
@@ -12,7 +13,6 @@ const COLLISION_DIST = MAGNET_RADIUS * 2 * 1.00; // Minimum distance between cen
 const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
 const MASS = 0.5e-3; // ~0.5g per magnet ball
 const DAMPING = 0.3; // Velocity damping per frame
-const thermalNoise = 1e-6;
 
 // Calculate net forces and torques on all magnets
 function calcAllForcesAndTorques(magnets) {
@@ -27,10 +27,10 @@ function calcAllForcesAndTorques(magnets) {
         magnets[j].pos, magnets[j].m
       );
 
-      forces[i] = ThreeAdd(forces[i], ft.force1);
-      forces[j] = ThreeAdd(forces[j], ft.force2);
-      torques[i] = ThreeAdd(torques[i], ft.torque1);
-      torques[j] = ThreeAdd(torques[j], ft.torque2);
+      forces[i] = Three.Add(forces[i], ft.force1);
+      forces[j] = Three.Add(forces[j], ft.force2);
+      torques[i] = Three.Add(torques[i], ft.torque1);
+      torques[j] = Three.Add(torques[j], ft.torque2);
     }
   }
   return { forces, torques };
@@ -48,46 +48,31 @@ function resolveCollisions(magnets) {
 
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      const dx = newMagnets[j].pos[0] - newMagnets[i].pos[0];
-      const dy = newMagnets[j].pos[1] - newMagnets[i].pos[1];
-      const dz = newMagnets[j].pos[2] - newMagnets[i].pos[2];
-      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const d = Three.DistanceTo(newMagnets[i].pos, newMagnets[j].pos);
+      const dist = Three.Length(d);
 
       if (dist < COLLISION_DIST) {
         console.warn(`Collision detected between magnet ${newMagnets[i].id} and ${newMagnets[j].id}: dist=${(COLLISION_DIST - dist) * 1000}mm`);
         // Normalize direction
-        const nx = dx / dist;
-        const ny = dy / dist;
-        const nz = dz / dist;
+        const n = Three.MultiplyScalar(d, 1 / dist);
 
         // Separation needed
         const overlap = COLLISION_DIST - dist;
         const separation = overlap / 2 + 0.00;
 
         // Push apart
-        newMagnets[i].pos[0] -= nx * separation;
-        newMagnets[i].pos[1] -= ny * separation;
-        newMagnets[i].pos[2] -= nz * separation;
-        newMagnets[j].pos[0] += nx * separation;
-        newMagnets[j].pos[1] += ny * separation;
-        newMagnets[j].pos[2] += nz * separation;
-
+        newMagnets[i].pos = Three.Add(newMagnets[i].pos, Three.MultiplyScalar(n, -separation));
+        newMagnets[j].pos = Three.Add(newMagnets[j].pos, Three.MultiplyScalar(n, separation));
         // Elastic collision response
-        const relVelX = newMagnets[i].vel[0] - newMagnets[j].vel[0];
-        const relVelY = newMagnets[i].vel[1] - newMagnets[j].vel[1];
-        const relVelZ = newMagnets[i].vel[2] - newMagnets[j].vel[2];
-        const relVelNormal = relVelX * nx + relVelY * ny + relVelZ * nz;
+        const relVel = Three.DistanceTo(newMagnets[i].vel, newMagnets[j].vel);
+        const relVelNormal = Three.Dot(relVel, n);
 
         if (relVelNormal > 0) {
           const restitution = 0.3; // Inelastic collision
           const impulse = relVelNormal * (1 + restitution) / 2;
 
-          newMagnets[i].vel[0] -= impulse * nx;
-          newMagnets[i].vel[1] -= impulse * ny;
-          newMagnets[i].vel[2] -= impulse * nz;
-          newMagnets[j].vel[0] += impulse * nx;
-          newMagnets[j].vel[1] += impulse * ny;
-          newMagnets[j].vel[2] += impulse * nz;
+          newMagnets[i].vel = Three.Add(newMagnets[i].vel, Three.MultiplyScalar(n, -impulse));
+          newMagnets[j].vel = Three.Add(newMagnets[j].vel, Three.MultiplyScalar(n, impulse));
         }
       }
     }
@@ -103,38 +88,22 @@ function applyTorque(m, omega, torque, dt) {
   // 检测是否在减速（力矩与角速度反向）
 
   const torqueDotOmega = torque[0] * omega[0] + torque[1] * omega[1] + torque[2] * omega[2];
-  const isDecelerating = torqueDotOmega < 0;
   // 减速时用更强阻尼，加速时用弱阻尼
-  const ANGULAR_DAMPING = isDecelerating ? DAMPING : 1;
-  const newOmega = [
-    omega[0] * ANGULAR_DAMPING + alpha[0] * dt,
-    omega[1] * ANGULAR_DAMPING + alpha[1] * dt,
-    omega[2] * ANGULAR_DAMPING + alpha[2] * dt
-  ];
-  const omegaMag = ThreeLength(newOmega);  // 旋转角度 = ω * dt
+  const ANGULAR_DAMPING = torqueDotOmega < 0 ? DAMPING : 1;
+  const newOmega = Three.Add(
+    Three.MultiplyScalar(omega, ANGULAR_DAMPING), // previous
+    Three.MultiplyScalar(alpha, dt) // added speed in this frame
+  );
+  const omegaMag = Three.Length(newOmega);  // 旋转角度 = ω * dt
   if (omegaMag < 1e-20) return { m, omega: newOmega };
 
   const angle = Math.min(omegaMag, 10) * dt;
   const axis = newOmega.map(w => w / omegaMag);
 
   // Rodrigues rotation formula
-  const cosA = Math.cos(angle);
-  const sinA = Math.sin(angle);
-  const dot = m[0] * axis[0] + m[1] * axis[1] + m[2] * axis[2];
-  const cross = [
-    axis[1] * m[2] - axis[2] * m[1],
-    axis[2] * m[0] - axis[0] * m[2],
-    axis[0] * m[1] - axis[1] * m[0]
-  ];
-
-  const newM = [
-    m[0] * cosA + cross[0] * sinA + axis[0] * dot * (1 - cosA),
-    m[1] * cosA + cross[1] * sinA + axis[1] * dot * (1 - cosA),
-    m[2] * cosA + cross[2] * sinA + axis[2] * dot * (1 - cosA)
-  ];
-  const len = ThreeLength(newM);
+  const newM = Three.RotateAroundAxis(m, axis, angle);
   console.log(`dt=${dt}, angle=${angle}, torque=${torque}, m=${m}, newM=${newM}, omega=${omega}, newOmega=${newOmega}`);
-  return { m: [newM[0] / len, newM[1] / len, newM[2] / len], omega: newOmega };
+  return { m: Three.Normalize(newM), omega: newOmega };
 }
 
 // Presets
@@ -172,7 +141,7 @@ const PRESETS = {
     ],
     vel: [0, 0, 0],
     omega: [0, 0, 0],
-    m: ThreeNormalize([Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5]),
+    m: Three.Normalize([Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5]),
     color: i % 2 ? 0x4444ff : 0xff4444
   })),
   cube: () => {
@@ -225,7 +194,7 @@ export default function MagnetSimulator() {
 
   // Physics simulation step
   const physicsStep = useCallback(() => {
-    const { magnets: currentMagnets, isSimulating: running, simSpeed: speed, rotateMoments: rotate } = simRef.current;
+    const { magnets: currentMagnets, isSimulating: running, simSpeed: dt, rotateMoments: rotate } = simRef.current;
     if (!running || currentMagnets.length < 2) return;
 
     const { forces, torques } = calcAllForcesAndTorques(currentMagnets);
@@ -234,29 +203,15 @@ export default function MagnetSimulator() {
     let newMagnets = currentMagnets.map((mag, i) => {
       const f = forces[i];
       const t = torques[i];
-
-      // F = ma, a = F/m
-      const ax = (f[0]) / MASS;
-      const ay = (f[1]) / MASS;
-      const az = (f[2]) / MASS;
-
-      // Update velocity with damping
-      const newVel = [
-        (mag.vel[0] + ax * speed) * DAMPING,
-        (mag.vel[1] + ay * speed) * DAMPING,
-        (mag.vel[2] + az * speed) * DAMPING
-      ];
-
+      // F = ma, a = F/m, dv = a * dt
+      const dv = Three.MultiplyScalar(f, dt / MASS);
+      const newVel = Three.Add(mag.vel, dv); // Apply damping to velocity
       // Update position
-      const newPos = [
-        mag.pos[0] + newVel[0] * speed,
-        mag.pos[1] + newVel[1] * speed,
-        mag.pos[2] + newVel[2] * speed
-      ];
+      const newPos = Three.Add(mag.pos, Three.MultiplyScalar(newVel, dt * DAMPING));
 
       // Update moment direction if enabled
-      const newM = rotate ? applyTorque(mag.m, mag.omega, t, speed) : { m: mag.m, omega: mag.omega };
-      const deltaM = [newM.m[0] - mag.m[0], newM.m[1] - mag.m[1], newM.m[2] - mag.m[2]];
+      const newM = rotate ? applyTorque(mag.m, mag.omega, t, dt) : { m: mag.m, omega: mag.omega };
+      const deltaM = Three.Length(Three.DistanceTo(mag.m, newM.m));
 
       return { ...mag, pos: newPos, vel: newVel, m: newM.m, omega: newM.omega, f: f, tau: t, deltaM: deltaM };
     });
@@ -402,7 +357,7 @@ export default function MagnetSimulator() {
 
         if (forces[idx]) {
           const f = forces[idx];
-          const fMag = ThreeLength(f);
+          const fMag = Three.Length(f);
 
           if (fMag > 1e-25) {
             const fDir = new THREE.Vector3(...f).normalize();
@@ -422,7 +377,7 @@ export default function MagnetSimulator() {
           // Torque arrow
           if (torques[idx]) {
             const t = torques[idx];
-            const tMag = ThreeLength(t);
+            const tMag = Three.Length(t);
 
             if (tMag > 1e-25) {
               const tDir = new THREE.Vector3(...t).normalize();
