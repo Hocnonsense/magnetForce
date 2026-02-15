@@ -4,6 +4,7 @@ import * as Three from "./three";
 // 物理常数
 // ============================================
 const MU_0 = 4 * Math.PI * 1e-7;      // 真空磁导率 (H/m)
+const DAMPING = 0.3; // Velocity damping per frame
 
 // ============================================
 // Fibonacci 球面均匀采样
@@ -19,7 +20,6 @@ function fibonacciSphere(n) {
     }
     return points;
 }
-
 function fibonacciSphere4(n) {
     const sampleN = (n + 1) >> 2; // 向上取整：n→n/4
     const basePoints = fibonacciSphere(sampleN);
@@ -35,17 +35,18 @@ function fibonacciSphere4(n) {
 }
 
 export default class BuckyBall {
-    constructor(radius_m = 2.5e-3, br = 1.2, n_samples = 50) {
+    constructor(radius_m = 2.5e-3, br = 1.2, mass = 0.5e-3, n_samples = 50) {
         this.radius = radius_m;
         this.br = br;
         this.mMag = br / MU_0;
+        this.mass = mass;
 
-        this.n_samples = n_samples;
         this.sphere_samples = fibonacciSphere4(n_samples);
-        this.area_per_sample = 4 * Math.PI * radius_m * radius_m / n_samples;
+        this.n_samples = this.sphere_samples.length;
+        this.area_per_sample = 4 * Math.PI * radius_m * radius_m / this.n_samples;
         const q_factor = this.mMag * this.area_per_sample;
-        this.sample_q = this.sphere_samples.map(p => p[1] * q_factor
-        )
+        this.sample_q = this.sphere_samples.map(p => p[1] * q_factor)
+        this.inertia = 0.4 * this.mass * (this.radius ** 2); // 球体转动惯量 (kg·m²)
     }
 
     rotateSphereSamples = (dir) => {
@@ -112,5 +113,35 @@ export default class BuckyBall {
             torque1: tau1,
             torque2: tau2
         };
+    }
+
+    /** return { m: Three.Normalize(newM), omega: newOmega } */
+    applyTorque(m, omega, torque, dt) {
+        const alpha = Three.MultiplyScalar(torque, 1 / this.inertia); // 角加速度
+        // 检测是否在减速（力矩与角速度反向）
+        const torqueDotOmega = Three.Dot(torque, omega);
+        // 减速时用更强阻尼，加速时用弱阻尼
+        const ANGULAR_DAMPING = torqueDotOmega < 0 ? DAMPING : 1;
+        const newOmega = Three.Add( // 更新角速度: ω_new = (ω + α*dt)
+            Three.MultiplyScalar(omega, ANGULAR_DAMPING), // previous
+            Three.MultiplyScalar(alpha, dt) // added speed in this frame
+        );
+        const omegaMag = Three.Length(newOmega);  // 旋转角度 = ω * dt
+        if (omegaMag < 1e-20) return { m, omega: newOmega };
+
+        const angle = Math.min(omegaMag * dt, 0.5);
+        const axis = Three.MultiplyScalar(newOmega, 1 / omegaMag);
+        const newM = Three.RotateAroundAxis(m, axis, angle);
+        // console.log(`dt=${dt}, angle=${angle}, torque=${torque}, m=${m}, newM=${newM}, omega=${omega}, newOmega=${newOmega}`);
+        return { m: Three.Normalize(newM), omega: newOmega };
+    }
+
+    /** return { pos: newPos, vel: newVel } */
+    applyVelocity(pos, v, f, dt) {
+        // F = ma, a = F/m, dv = a * dt
+        const dv = Three.MultiplyScalar(f, dt / this.mass);
+        const newVel = Three.MultiplyScalar(Three.Add(v, dv), DAMPING); // 阻尼作用于速度
+        const newPos = Three.Add(pos, Three.MultiplyScalar(newVel, dt)); // 正常位置更新
+        return { pos: newPos, vel: newVel };
     }
 }

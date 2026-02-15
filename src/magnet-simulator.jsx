@@ -6,13 +6,11 @@ import BuckyBall from './magnet-ball';
 // Physical constants for NdFeB N35
 const MAGNET_RADIUS = 0.0025; // 5mm diameter
 const BR = 1.2; // Tesla
-const BUCKYBALL = new BuckyBall(MAGNET_RADIUS, BR, 200);
+const BUCKYBALL = new BuckyBall(MAGNET_RADIUS, BR, 0.5e-3, 200);
 // Simulation constants
 const VISUAL_SCALE = 100; // Scale factor for rendering positions
 const COLLISION_DIST = MAGNET_RADIUS * 2 * 1.00; // Minimum distance between centers
 const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
-const MASS = 0.5e-3; // ~0.5g per magnet ball
-const DAMPING = 0.3; // Velocity damping per frame
 
 // Calculate net forces and torques on all magnets
 function calcAllForcesAndTorques(magnets) {
@@ -80,37 +78,11 @@ function resolveCollisions(magnets) {
   return newMagnets;
 }
 
-// Rotate moment vector by torque
-function applyTorque(m, omega, torque, dt) {
-  const I = 0.4 * MASS * (MAGNET_RADIUS ** 2);
-  const alpha = torque.map(t => t / I); // 角加速度
-  // 更新角速度: ω_new = (ω + α*dt) * damping
-  // 检测是否在减速（力矩与角速度反向）
-
-  const torqueDotOmega = torque[0] * omega[0] + torque[1] * omega[1] + torque[2] * omega[2];
-  // 减速时用更强阻尼，加速时用弱阻尼
-  const ANGULAR_DAMPING = torqueDotOmega < 0 ? DAMPING : 1;
-  const newOmega = Three.Add(
-    Three.MultiplyScalar(omega, ANGULAR_DAMPING), // previous
-    Three.MultiplyScalar(alpha, dt) // added speed in this frame
-  );
-  const omegaMag = Three.Length(newOmega);  // 旋转角度 = ω * dt
-  if (omegaMag < 1e-20) return { m, omega: newOmega };
-
-  const angle = Math.min(omegaMag, 10) * dt;
-  const axis = newOmega.map(w => w / omegaMag);
-
-  // Rodrigues rotation formula
-  const newM = Three.RotateAroundAxis(m, axis, angle);
-  console.log(`dt=${dt}, angle=${angle}, torque=${torque}, m=${m}, newM=${newM}, omega=${omega}, newOmega=${newOmega}`);
-  return { m: Three.Normalize(newM), omega: newOmega };
-}
-
 // Presets
 const PRESETS = {
   pair: () => [
     { id: 0, pos: [-0.0025, 0, 0], vel: [0, 0, 0], omega: [0, 0, 0], m: [1, 0, 0], color: 0xff4444 },
-    { id: 1, pos: [0.0025, 0, 0], vel: [0, 0, 0], omega: [0, 0, 0], m: [1, 0, 0], color: 0x4444ff }
+    { id: 1, pos: [0.0025, 0, 0], vel: [0, 0, 0], omega: [0, 0, 0], m: [0, 1, 0], color: 0x4444ff }
   ],
   chain: () => Array.from({ length: 5 }, (_, i) => ({
     id: i,
@@ -204,16 +176,11 @@ export default function MagnetSimulator() {
       const f = forces[i];
       const t = torques[i];
       // F = ma, a = F/m, dv = a * dt
-      const dv = Three.MultiplyScalar(f, dt / MASS);
-      const newVel = Three.Add(mag.vel, dv); // Apply damping to velocity
-      // Update position
-      const newPos = Three.Add(mag.pos, Three.MultiplyScalar(newVel, dt * DAMPING));
-
-      // Update moment direction if enabled
-      const newM = rotate ? applyTorque(mag.m, mag.omega, t, dt) : { m: mag.m, omega: mag.omega };
+      const newP = BUCKYBALL.applyVelocity(mag.pos, mag.vel, f, dt);
+      const newM = rotate ? BUCKYBALL.applyTorque(mag.m, mag.omega, t, dt) : { m: mag.m, omega: mag.omega };
       const deltaM = Three.Length(Three.DistanceTo(mag.m, newM.m));
 
-      return { ...mag, pos: newPos, vel: newVel, m: newM.m, omega: newM.omega, f: f, tau: t, deltaM: deltaM };
+      return { ...mag, pos: newP.pos, vel: newP.vel, m: newM.m, omega: newM.omega, f: f, tau: t, deltaM: deltaM };
     });
 
     // Resolve collisions
@@ -323,7 +290,7 @@ export default function MagnetSimulator() {
 
     magnets.forEach((mag, idx) => {
       // Sphere
-      const geo = new THREE.SphereGeometry(MAGNET_RADIUS * VISUAL_SCALE, 32, 32);
+      const geo = new THREE.SphereGeometry(VISUAL_RADIUS, 32, 32);
       const mat = new THREE.MeshStandardMaterial({
         color: mag.color,
         metalness: 0.8,
@@ -453,6 +420,7 @@ export default function MagnetSimulator() {
       pos: [(Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4, 0],
       vel: [0, 0, 0],
       m: [0, 0, 1],
+      omega: [0, 0, 0],
       color: newId % 2 ? 0x4444ff : 0xff4444
     }]);
   };
@@ -647,7 +615,7 @@ export default function MagnetSimulator() {
             <div style={{ fontSize: '10px', color: '#aaa' }}>磁矩: {magnets.find(m => m.id === selectedId)?.m.join(', ')}</div>
             <div style={{ fontSize: '10px', color: '#aaa' }}>受力: {magnets.find(m => m.id === selectedId)?.f.join(', ')}</div>
             <div style={{ fontSize: '10px', color: '#aaa' }}>磁轴力矩: {magnets.find(m => m.id === selectedId)?.tau.join(', ')}</div>
-            <div style={{ fontSize: '10px', color: '#aaa' }}>磁矩偏转量: {magnets.find(m => m.id === selectedId)?.deltaM.join(', ')}</div>
+            <div style={{ fontSize: '10px', color: '#aaa' }}>磁矩偏转量: {magnets.find(m => m.id === selectedId)?.deltaM}</div>
           </div>
         )}
 
