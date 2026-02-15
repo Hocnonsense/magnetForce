@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import * as Three from './three';
 import BuckyBall from './magnet-ball';
+import React from 'react';
 
 // Physical constants for NdFeB N35
 const MAGNET_RADIUS = 0.0025; // 5mm diameter
@@ -21,8 +22,7 @@ function calcAllForcesAndTorques(magnets) {
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {  // j > i，每对只算一次
       const ft = BUCKYBALL.calcForceAndTorque(
-        magnets[i].pos, magnets[i].m,
-        magnets[j].pos, magnets[j].m
+        Three.DistanceTo(magnets[i].pos, magnets[j].pos), magnets[i].m, magnets[j].m
       );
 
       forces[i] = Three.Add(forces[i], ft.force1);
@@ -299,7 +299,8 @@ export default function MagnetSimulator() {
         emissiveIntensity: selectedId === mag.id ? 0.4 : 0.15
       });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(...mag.pos.map(p => p * VISUAL_SCALE));
+      const scaled = mag.pos.map(p => p * VISUAL_SCALE);
+      mesh.position.set(scaled[0], scaled[1], scaled[2]);
       mesh.userData.id = mag.id;
       scene.add(mesh);
       meshesRef.current.push(mesh);

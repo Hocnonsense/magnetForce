@@ -72,11 +72,10 @@ export default class BuckyBall {
   // ============================================
   // 力和力矩计算（近场磁荷积分）
   // ============================================
-  calcForceAndTorque(c1, m1, c2, m2) {
+  calcForceAndTorque(d, m1, m2) {
     const R = this.radius;
     const minDist = R / this.n_samples;
 
-    const d = Three.DistanceTo(c1, c2);
     const dir1 = Three.Normalize(m1);
     const dir2 = Three.Normalize(m2);
 
@@ -139,8 +138,8 @@ export default class BuckyBall {
   applyVelocity(pos, v, f, dt) {
     // F = ma, a = F/m, dv = a * dt
     const dv = Three.MultiplyScalar(f, dt / this.mass);
-    const newVel = Three.MultiplyScalar(Three.Add(v, dv), DAMPING); // 阻尼作用于速度
-    const newPos = Three.Add(pos, Three.MultiplyScalar(newVel, dt)); // 正常位置更新
+    const newVel = Three.Add(Three.MultiplyScalar(v, DAMPING), dv);
+    const newPos = Three.Add(pos, Three.MultiplyScalar(newVel, dt));
     return { pos: newPos, vel: newVel };
   }
 }
