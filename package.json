@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dimforge/rapier3d": "^0.19.3",
+    "@dimforge/rapier3d-compat": "^0.19.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "three": "^0.182.0"

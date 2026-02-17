@@ -1,82 +1,29 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import * as Three from './three';
 import BuckyBall from './magnet-ball';
-import React from 'react';
+import RAPIER from '@dimforge/rapier3d-compat';
 
 // Physical constants for NdFeB N35
 const MAGNET_RADIUS = 0.0025; // 5mm diameter
 const BR = 1.2; // Tesla
-const BUCKYBALL = new BuckyBall(MAGNET_RADIUS, BR, 0.5e-3, 200);
+const MASS = 0.5e-3; // 0.5g
+const BUCKYBALL = new BuckyBall(MAGNET_RADIUS, BR, MASS, 200);
+
+// 外壳厚度（镀层 + 弹性形变）
+const SHELL_THICKNESS = MAGNET_RADIUS * 0.01;  // 1% ≈ 25μm
+
 // Simulation constants
-const VISUAL_SCALE = 100; // Scale factor for rendering positions
-const COLLISION_DIST = MAGNET_RADIUS * 2 * 1.00; // Minimum distance between centers
+const VISUAL_SCALE = 100;
 const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
+const BOUND = 0.02;
 
-// Calculate net forces and torques on all magnets
-function calcAllForcesAndTorques(magnets) {
-  const n = magnets.length;
-  const forces = magnets.map(() => [0, 0, 0]);
-  const torques = magnets.map(() => [0, 0, 0]);
-
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {  // j > i，每对只算一次
-      const ft = BUCKYBALL.calcForceAndTorque(
-        Three.DistanceTo(magnets[i].pos, magnets[j].pos), magnets[i].m, magnets[j].m
-      );
-
-      forces[i] = Three.Add(forces[i], ft.force1);
-      forces[j] = Three.Add(forces[j], ft.force2);
-      torques[i] = Three.Add(torques[i], ft.torque1);
-      torques[j] = Three.Add(torques[j], ft.torque2);
-    }
-  }
-  return { forces, torques };
-}
-
-// Handle collisions - prevent overlap and apply repulsion
-function resolveCollisions(magnets) {
-  const n = magnets.length;
-  const newMagnets = magnets.map(m => ({
-    ...m,
-    pos: [...m.pos],
-    vel: [...m.vel]
-  }));
-
-
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      const d = Three.DistanceTo(newMagnets[i].pos, newMagnets[j].pos);
-      const dist = Three.Length(d);
-
-      if (dist < COLLISION_DIST) {
-        console.warn(`Collision detected between magnet ${newMagnets[i].id} and ${newMagnets[j].id}: dist=${(COLLISION_DIST - dist) * 1000}mm`);
-        // Normalize direction
-        const n = Three.MultiplyScalar(d, 1 / dist);
-
-        // Separation needed
-        const overlap = COLLISION_DIST - dist;
-        const separation = overlap / 2 + 0.00;
-
-        // Push apart
-        newMagnets[i].pos = Three.Add(newMagnets[i].pos, Three.MultiplyScalar(n, -separation));
-        newMagnets[j].pos = Three.Add(newMagnets[j].pos, Three.MultiplyScalar(n, separation));
-        // Elastic collision response
-        const relVel = Three.DistanceTo(newMagnets[i].vel, newMagnets[j].vel);
-        const relVelNormal = Three.Dot(relVel, n);
-
-        if (relVelNormal > 0) {
-          const restitution = 0.3; // Inelastic collision
-          const impulse = relVelNormal * (1 + restitution) / 2;
-
-          newMagnets[i].vel = Three.Add(newMagnets[i].vel, Three.MultiplyScalar(n, -impulse));
-          newMagnets[j].vel = Three.Add(newMagnets[j].vel, Three.MultiplyScalar(n, impulse));
-        }
-      }
-    }
-  }
-  return newMagnets;
-}
+// 接触状态
+const CONTACT_STATE = {
+  NONE: 'none',
+  SHELL: 'shell',
+  HARD: 'hard'
+};
 
 // Presets
 const PRESETS = {
@@ -133,6 +80,302 @@ const PRESETS = {
   }
 };
 
+/**
+ * Rapier 物理世界管理器
+ */
+class RapierWorld {
+  constructor(rapier) {
+    this.RAPIER = rapier;
+    this.world = new rapier.World({ x: 0, y: 0, z: 0 });
+    this.bodies = new Map();
+    this.moments = new Map();
+    this.contactStates = new Map();
+    this.world.integrationParameters.numSolverIterations = 16;
+  }
+
+  syncToRapier(magnets) {
+    // [TODO] 优化：增量更新而不是完全重建
+    for (const [id, body] of this.bodies) {
+      this.world.removeRigidBody(body);
+      this.bodies.delete(id);
+      this.moments.delete(id);
+    }
+    for (const mag of magnets) {
+      let body = this.bodies.get(mag.id);
+      const rigidBodyDesc = this.RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(mag.pos[0], mag.pos[1], mag.pos[2])
+        .setLinearDamping(0.3)
+        .setAngularDamping(0.3);
+
+      body = this.world.createRigidBody(rigidBodyDesc);
+      body.setLinvel({ x: mag.vel[0], y: mag.vel[1], z: mag.vel[2] }, true);
+      body.setAngvel({ x: mag.omega[0], y: mag.omega[1], z: mag.omega[2] }, true);
+
+      const colliderDesc = this.RAPIER.ColliderDesc.ball(MAGNET_RADIUS)
+        .setMass(MASS)
+        .setRestitution(0.0)
+        .setFriction(0.0);
+
+      this.world.createCollider(colliderDesc, body);
+      this.bodies.set(mag.id, body);
+
+      this.moments.set(mag.id, [...mag.m]);
+    }
+  }
+
+  /** 计算磁力（用内部存储的位置和磁矩） */
+  calcForces(magnets) {
+    const n = magnets.length;
+    const forces = magnets.map(() => [0, 0, 0]);
+    const torques = magnets.map(() => [0, 0, 0]);
+
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const body1 = this.bodies.get(magnets[i].id);
+        const body2 = this.bodies.get(magnets[j].id);
+        if (!body1 || !body2) continue;
+
+        const p1 = body1.translation();
+        const p2 = body2.translation();
+        const m1 = this.moments.get(magnets[i].id);
+        const m2 = this.moments.get(magnets[j].id);
+
+        const ft = BUCKYBALL.calcForceAndTorque(
+          [p2.x - p1.x, p2.y - p1.y, p2.z - p1.z], m1, m2
+        )
+        ft.force1[0] + 1
+
+        forces[i] = Three.Add(forces[i], ft.force1);
+        forces[j] = Three.Add(forces[j], ft.force2);
+        torques[i] = Three.Add(torques[i], ft.torque1);
+        torques[j] = Three.Add(torques[j], ft.torque2);
+      }
+    }
+    return { forces, torques };
+  }
+
+  _contactKey(i, j) {
+    return i < j ? `${i},${j}` : `${j},${i}`;
+  }
+
+  _getContactState(dist) {
+    const CONTACT_DIST = MAGNET_RADIUS * 2;
+    if (dist <= CONTACT_DIST) {
+      return CONTACT_STATE.HARD;
+    } else if (dist <= CONTACT_DIST + SHELL_THICKNESS) {
+      return CONTACT_STATE.SHELL;
+    } else {
+      return CONTACT_STATE.NONE;
+    }
+  }
+
+  _reportStateChange(idI, idJ, oldState, newState, dist) {
+    const penetration = MAGNET_RADIUS * 2 - dist;
+    const distStr = (dist * 1000).toFixed(4);
+    const penStr = (penetration * 1e6).toFixed(2);
+
+    const stateEmoji = {
+      [CONTACT_STATE.NONE]: '⚪',
+      [CONTACT_STATE.SHELL]: '🟡',
+      [CONTACT_STATE.HARD]: '🔴'
+    };
+
+    console.log(
+      `%c${stateEmoji[oldState]} → ${stateEmoji[newState]} ` +
+      `球${idI}-球${idJ}: ${oldState} → ${newState} ` +
+      `(dist=${distStr}mm, penetration=${penStr}μm)`,
+      newState === CONTACT_STATE.HARD ? 'color: red; font-weight: bold' :
+        newState === CONTACT_STATE.SHELL ? 'color: orange' : 'color: green'
+    );
+  }
+
+  getContacts(magnets) {
+    const CONTACT_DIST = MAGNET_RADIUS * 2;
+    const contacts = [];
+    const n = magnets.length;
+
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const body1 = this.bodies.get(magnets[i].id);
+        const body2 = this.bodies.get(magnets[j].id);
+        if (!body1 || !body2) continue;
+
+        const p1 = body1.translation();
+        const p2 = body2.translation();
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dz = p2.z - p1.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        const key = this._contactKey(magnets[i].id, magnets[j].id);
+        const newState = this._getContactState(dist);
+        const oldState = this.contactStates.get(key) || CONTACT_STATE.NONE;
+
+        if (newState !== oldState) {
+          this._reportStateChange(magnets[i].id, magnets[j].id, oldState, newState, dist);
+          this.contactStates.set(key, newState);
+        }
+
+        if (dist <= CONTACT_DIST + SHELL_THICKNESS && dist > 1e-10) {
+          contacts.push({
+            i, j,
+            normal: [dx / dist, dy / dist, dz / dist],
+            dist,
+            penetration: CONTACT_DIST - dist
+          });
+        }
+      }
+    }
+
+    return contacts;
+  }
+
+  computeConstrainedForces(magnets, forces, contacts) {
+    const constrained = forces.map(f => [...f]);
+
+    for (const { i, j, normal } of contacts) {
+      const f1n = Three.Dot(forces[i], normal);
+      const f2n = Three.Dot(forces[j], normal);
+      const lambda = (f1n - f2n) / 2;
+
+      if (lambda > 0) {
+        constrained[i] = Three.Add(constrained[i], Three.MultiplyScalar(normal, lambda));
+        constrained[j] = Three.Add(constrained[j], Three.MultiplyScalar(normal, -lambda));
+      }
+    }
+
+    return constrained;
+  }
+
+  applyForces(magnets, forces) {
+    for (let i = 0; i < magnets.length; i++) {
+      const body = this.bodies.get(magnets[i].id);
+      if (body) {
+        body.resetForces(true);
+        body.addForce({ x: forces[i][0], y: forces[i][1], z: forces[i][2] }, true);
+      }
+    }
+  }
+
+  applyShellAbsorption(magnets, contacts) {
+    for (const { i, j, normal, penetration } of contacts) {
+      const body1 = this.bodies.get(magnets[i].id);
+      const body2 = this.bodies.get(magnets[j].id);
+      if (!body1 || !body2) continue;
+
+      const v1 = body1.linvel();
+      const v2 = body2.linvel();
+
+      const v1n = v1.x * normal[0] + v1.y * normal[1] + v1.z * normal[2];
+      const v2n = v2.x * normal[0] + v2.y * normal[1] + v2.z * normal[2];
+      const relVn = v2n - v1n;
+
+      // 在外壳范围内清零法向相对速度
+      if (Math.abs(relVn) > 1e-12) {
+        const avgVn = (v1n + v2n) / 2;
+
+        body1.setLinvel({
+          x: v1.x + (avgVn - v1n) * normal[0],
+          y: v1.y + (avgVn - v1n) * normal[1],
+          z: v1.z + (avgVn - v1n) * normal[2]
+        }, true);
+
+        body2.setLinvel({
+          x: v2.x + (avgVn - v2n) * normal[0],
+          y: v2.y + (avgVn - v2n) * normal[1],
+          z: v2.z + (avgVn - v2n) * normal[2]
+        }, true);
+      }
+
+      // 位置修正
+      if (penetration > 0) {
+        const corr = penetration / 2 + 1e-9;
+        const p1 = body1.translation();
+        const p2 = body2.translation();
+
+        body1.setTranslation({
+          x: p1.x - corr * normal[0],
+          y: p1.y - corr * normal[1],
+          z: p1.z - corr * normal[2]
+        }, true);
+
+        body2.setTranslation({
+          x: p2.x + corr * normal[0],
+          y: p2.y + corr * normal[1],
+          z: p2.z + corr * normal[2]
+        }, true);
+      }
+    }
+  }
+
+  step(magnets, dt, rotateMoments) {
+    // 1. 计算磁力
+    const { forces, torques } = this.calcForces(magnets);
+    // 2. 接触检测
+    const contacts = this.getContacts(magnets);
+    // 3. 约束力
+    const constrainedForces = this.computeConstrainedForces(magnets, forces, contacts);
+    // 4. 施加力
+    this.applyForces(magnets, constrainedForces);
+    // 5. 吸能（在积分前）
+    this.applyShellAbsorption(magnets, contacts);
+    // 6. Rapier 积分
+    this.world.integrationParameters.dt = dt;
+    this.world.step();
+    // 7. 再次吸能和修正（积分后可能产生新穿透）
+    const contactsAfter = this.getContacts(magnets);
+    this.applyShellAbsorption(magnets, contactsAfter);
+    // 8. 更新磁矩
+    if (rotateMoments) {
+      for (const mag of magnets) {
+        const m = this.moments.get(mag.id);
+        const body = this.bodies.get(mag.id);
+        if (!body || !m) continue;
+
+        const omega = body.angvel();
+        const omegaArr = [omega.x, omega.y, omega.z];
+        const idx = magnets.findIndex(x => x.id === mag.id);
+
+        const result = BUCKYBALL.applyTorque(m, omegaArr, torques[idx], dt);
+        this.moments.set(mag.id, result.m);
+      }
+    }
+    // 9. 返回状态
+    return this.readFromRapier(magnets, forces, torques);
+  }
+
+  readFromRapier(magnets, forces, torques) {
+    return magnets.map((mag, i) => {
+      const body = this.bodies.get(mag.id);
+      if (!body) return mag;
+
+      const pos = body.translation();
+      const vel = body.linvel();
+      const omega = body.angvel();
+      const m = this.moments.get(mag.id);
+
+      return {
+        ...mag,
+        pos: [pos.x, pos.y, pos.z],
+        vel: [vel.x, vel.y, vel.z],
+        omega: [omega.x, omega.y, omega.z],
+        m: m || mag.m,
+        f: forces?.[i] || [0, 0, 0],
+        tau: torques?.[i] || [0, 0, 0]
+      };
+    });
+  }
+
+  reset() {
+    for (const body of this.bodies.values()) {
+      this.world.removeRigidBody(body);
+    }
+    this.bodies.clear();
+    this.moments.clear();
+    this.contactStates.clear();
+  }
+}
+
 export default function MagnetSimulator() {
   // const res = new BuckyBall(MAGNET_RADIUS, BR, 200).calcForceAndTorque(
   //   [-0.0025, 0, 0], [1, 0, 0], [0.0025, 0, 0], [1, 0, 0]
@@ -157,50 +400,54 @@ export default function MagnetSimulator() {
   const torqueArrowsRef = useRef([]);
   const animIdRef = useRef(null);
 
-  // Simulation ref to access current state in animation loop
-  const simRef = useRef({ magnets, isSimulating, simSpeed, rotateMoments });
+  // Rapier refs
+  const [ready, setReady] = useState(false);
+  const rapierWorldRef = useRef(null);
+  const needsSyncRef = useRef(true);
 
+  // 状态 ref（每次渲染立即更新）
+  const stateRef = useRef({ magnets, isSimulating, simSpeed, rotateMoments });
+  stateRef.current = { magnets, isSimulating, simSpeed, rotateMoments };
+
+  // 初始化 Rapier
   useEffect(() => {
-    simRef.current = { magnets, isSimulating, simSpeed, rotateMoments };
-  }, [magnets, isSimulating, simSpeed, rotateMoments]);
-
-  // Physics simulation step
-  const physicsStep = useCallback(() => {
-    const { magnets: currentMagnets, isSimulating: running, simSpeed: dt, rotateMoments: rotate } = simRef.current;
-    if (!running || currentMagnets.length < 2) return;
-
-    const { forces, torques } = calcAllForcesAndTorques(currentMagnets);
-
-    // Update velocities and positions
-    let newMagnets = currentMagnets.map((mag, i) => {
-      const f = forces[i];
-      const t = torques[i];
-      // F = ma, a = F/m, dv = a * dt
-      const newP = BUCKYBALL.applyVelocity(mag.pos, mag.vel, f, dt);
-      const newM = rotate ? BUCKYBALL.applyTorque(mag.m, mag.omega, t, dt) : { m: mag.m, omega: mag.omega };
-      const deltaM = Three.Length(Three.DistanceTo(mag.m, newM.m));
-
-      return { ...mag, pos: newP.pos, vel: newP.vel, m: newM.m, omega: newM.omega, f: f, tau: t, deltaM: deltaM };
+    let mounted = true;
+    RAPIER.init().then(() => {
+      if (!mounted) return;
+      console.log('✅ Rapier3D initialized');
+      rapierWorldRef.current = new RapierWorld(RAPIER);
+      setReady(true);
     });
+    return () => { mounted = false; };
+  }, []);
 
-    // Resolve collisions
-    newMagnets = resolveCollisions(newMagnets);
-    // Boundary constraints
-    newMagnets = newMagnets.map(mag => ({
+  // 物理步进
+  const physicsStep = useCallback(() => {
+    const { magnets: currentMagnets, isSimulating: running, simSpeed: dt, rotateMoments: rotate } = stateRef.current;
+    const rapierWorld = rapierWorldRef.current;
+
+    if (!running || !rapierWorld || currentMagnets.length < 2) return;
+
+    // 同步到 Rapier（仅在需要时）
+    if (needsSyncRef.current) {
+      rapierWorld.syncToRapier(currentMagnets);
+      console.log('🔄 syncing to Rapier');
+      needsSyncRef.current = false;
+    }
+
+    if (rapierWorld.bodies.size < 2) return;
+    const newMagnets = rapierWorld.step(currentMagnets, dt, rotate); // 物理步进
+    const bounded = newMagnets.map(mag => ({ // 边界约束
       ...mag,
-      pos: [
-        Math.max(-8, Math.min(8, mag.pos[0])),
-        Math.max(-6, Math.min(6, mag.pos[1])),
-        Math.max(-4, Math.min(4, mag.pos[2]))
-      ]
+      pos: mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p)))
     }));
-    setMagnets(newMagnets);
+    setMagnets(bounded);
   }, []);
 
   // Initialize Three.js
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || !ready) return;
 
     let width = container.clientWidth || 800;
     let height = container.clientHeight || 600;
@@ -241,6 +488,7 @@ export default function MagnetSimulator() {
 
       // Run physics at fixed timestep
       if (time - lastTime > 16) {
+        needsSyncRef.current = true; // 标记需要同步
         physicsStep();
         lastTime = time;
       }
@@ -266,7 +514,7 @@ export default function MagnetSimulator() {
         container.removeChild(renderer.domElement);
       }
     };
-  }, [physicsStep]);
+  }, [physicsStep, ready]);
 
   // Update meshes when magnets change
   useEffect(() => {
@@ -283,12 +531,7 @@ export default function MagnetSimulator() {
     forceArrowsRef.current = [];
     torqueArrowsRef.current = [];
 
-    // Calculate forces and torques for visualization
-    const { forces, torques } = magnets.length > 1
-      ? { forces: magnets.map((mag) => mag.f), torques: magnets.map((mag) => mag.tau) }
-      : { forces: [], torques: [] };
-
-    magnets.forEach((mag, idx) => {
+    magnets.forEach((mag) => {
       // Sphere
       const geo = new THREE.SphereGeometry(VISUAL_RADIUS, 32, 32);
       const mat = new THREE.MeshStandardMaterial({
@@ -307,12 +550,12 @@ export default function MagnetSimulator() {
 
       if (showVectors) {
         // Moment arrow - 长度约为直径的1.2倍
-        const arrowLength = VISUAL_RADIUS * 3.6;  // = 0.6
+        const arrowLength = VISUAL_RADIUS * 3.6;
         const arrowHeadLength = VISUAL_RADIUS * 0.5;
         const arrowHeadWidth = VISUAL_RADIUS * 0.3;
 
         const dir = new THREE.Vector3(...mag.m).normalize();
-        const origin = new THREE.Vector3(...mag.pos.map(p => p * VISUAL_SCALE));
+        const origin = new THREE.Vector3(...scaled);
         const arrow = new THREE.ArrowHelper(
           dir, origin,
           arrowLength,
@@ -323,8 +566,8 @@ export default function MagnetSimulator() {
         scene.add(arrow);
         arrowsRef.current.push(arrow);
 
-        if (forces[idx]) {
-          const f = forces[idx];
+        if (mag.f) {
+          const f = mag.f;
           const fMag = Three.Length(f);
 
           if (fMag > 1e-25) {
@@ -343,10 +586,9 @@ export default function MagnetSimulator() {
           }
 
           // Torque arrow
-          if (torques[idx]) {
-            const t = torques[idx];
+          if (mag.tau) {
+            const t = mag.tau;
             const tMag = Three.Length(t);
-
             if (tMag > 1e-25) {
               const tDir = new THREE.Vector3(...t).normalize();
               const tLen = VISUAL_RADIUS * Math.min(5, Math.max(0.4, Math.log10(tMag + 1e-10) + 8));
@@ -365,7 +607,7 @@ export default function MagnetSimulator() {
       }
     });
 
-  }, [magnets, selectedId, showVectors, isSimulating]);
+  }, [magnets, selectedId, showVectors]);
 
   // Mouse interaction
   const handleClick = (e) => {
@@ -392,6 +634,7 @@ export default function MagnetSimulator() {
 
   const rotateMoment = (axis) => {
     if (selectedId === null) return;
+    needsSyncRef.current = true;
     const angle = Math.PI / 6;
     setMagnets(prev => prev.map(mag => {
       if (mag.id !== selectedId) return mag;
@@ -407,6 +650,7 @@ export default function MagnetSimulator() {
 
   const moveMagnet = (dx, dy, dz = 0) => {
     if (selectedId === null) return;
+    needsSyncRef.current = true;
     setMagnets(prev => prev.map(mag =>
       mag.id === selectedId
         ? { ...mag, pos: [mag.pos[0] + dx, mag.pos[1] + dy, mag.pos[2] + dz], vel: [0, 0, 0] }
@@ -415,10 +659,11 @@ export default function MagnetSimulator() {
   };
 
   const addMagnet = () => {
+    needsSyncRef.current = true;
     const newId = Math.max(...magnets.map(m => m.id), -1) + 1;
     setMagnets(prev => [...prev, {
       id: newId,
-      pos: [(Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4, 0],
+      pos: [(Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02, 0],
       vel: [0, 0, 0],
       m: [0, 0, 1],
       omega: [0, 0, 0],
@@ -428,13 +673,60 @@ export default function MagnetSimulator() {
 
   const removeMagnet = () => {
     if (selectedId === null) return;
+    needsSyncRef.current = true;
     setMagnets(prev => prev.filter(m => m.id !== selectedId));
     setSelectedId(null);
   };
 
   const resetVelocities = () => {
+    needsSyncRef.current = true;
     setMagnets(prev => prev.map(m => ({ ...m, vel: [0, 0, 0], omega: [0, 0, 0] })));
   };
+
+  const loadPreset = (fn) => {
+    if (rapierWorldRef.current) {
+      rapierWorldRef.current.reset();
+    }
+    needsSyncRef.current = true;
+    setMagnets(fn());
+    setSelectedId(null);
+    setIsSimulating(false);
+  };
+
+  const perturbPositions = () => {
+    needsSyncRef.current = true;
+    setMagnets(prev => prev.map(m => ({
+      ...m,
+      pos: m.pos.map(p => p + (Math.random() - 0.5) * 0.3 * MAGNET_RADIUS),
+      vel: [0, 0, 0]
+    })));
+  };
+
+  const toggleSimulation = () => {
+    if (!isSimulating) {
+      needsSyncRef.current = true;
+    }
+    setIsSimulating(!isSimulating);
+  };
+
+  if (!ready) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100vh',
+        background: '#08080f',
+        color: '#e0e0e0',
+        fontFamily: 'system-ui'
+      }}>
+        <div>
+          <div style={{ fontSize: '24px', marginBottom: '10px' }}>🧲</div>
+          <div>Loading physics engine...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -468,6 +760,7 @@ export default function MagnetSimulator() {
         }}>
           <span style={{ fontSize: '24px' }}>🧲</span>
           NdFeB 磁力球模拟
+          <span style={{ fontSize: '10px', color: '#666', marginLeft: 'auto' }}>Rapier3D</span>
         </h1>
 
         {/* Simulation Controls */}
@@ -480,7 +773,7 @@ export default function MagnetSimulator() {
           <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>动力学模拟</div>
 
           <button
-            onClick={() => setIsSimulating(!isSimulating)}
+            onClick={toggleSimulation}
             style={{
               width: '100%',
               padding: '12px',
@@ -503,11 +796,7 @@ export default function MagnetSimulator() {
             <button onClick={resetVelocities} style={smallBtnStyle}>
               重置速度
             </button>
-            <button onClick={() => setMagnets(prev => prev.map(m => ({
-              ...m,
-              pos: m.pos.map(p => p + (Math.random() - 0.5) * 0.3 * MAGNET_RADIUS),
-              vel: [0, 0, 0]
-            })))} style={smallBtnStyle}>
+            <button onClick={perturbPositions} style={smallBtnStyle}>
               扰动位置
             </button>
           </div>
@@ -549,7 +838,7 @@ export default function MagnetSimulator() {
             {Object.entries(PRESETS).map(([name, fn]) => (
               <button
                 key={name}
-                onClick={() => { setMagnets(fn()); setSelectedId(null); setIsSimulating(false); }}
+                onClick={() => loadPreset(fn)}
                 style={presetBtnStyle}
               >
                 {name}
@@ -610,13 +899,21 @@ export default function MagnetSimulator() {
               <button onClick={() => rotateMoment('z')} style={smallBtnStyle}>绕Z</button>
             </div>
 
-            <div style={{ fontSize: '11px', color: '#666', marginBottom: '6px' }}>当前状态:</div>
-            <div style={{ fontSize: '10px', color: '#aaa' }}>位置: {magnets.find(m => m.id === selectedId)?.pos.join(', ')}</div>
-            <div style={{ fontSize: '10px', color: '#aaa' }}>速度: {magnets.find(m => m.id === selectedId)?.vel.join(', ')}</div>
-            <div style={{ fontSize: '10px', color: '#aaa' }}>磁矩: {magnets.find(m => m.id === selectedId)?.m.join(', ')}</div>
-            <div style={{ fontSize: '10px', color: '#aaa' }}>受力: {magnets.find(m => m.id === selectedId)?.f.join(', ')}</div>
-            <div style={{ fontSize: '10px', color: '#aaa' }}>磁轴力矩: {magnets.find(m => m.id === selectedId)?.tau.join(', ')}</div>
-            <div style={{ fontSize: '10px', color: '#aaa' }}>磁矩偏转量: {magnets.find(m => m.id === selectedId)?.deltaM}</div>
+            <div style={{ fontSize: '11px', color: '#666', marginTop: '10px', marginBottom: '6px' }}>当前状态:</div>
+            {(() => {
+              const mag = magnets.find(m => m.id === selectedId);
+              if (!mag) return null;
+              const fmt = (arr) => arr?.map(x => x?.toExponential?.(2) ?? 'N/A').join(', ') || 'N/A';
+              return (
+                <>
+                  <div style={{ fontSize: '10px', color: '#aaa' }}>位置: {fmt(mag.pos)}</div>
+                  <div style={{ fontSize: '10px', color: '#aaa' }}>速度: {fmt(mag.vel)}</div>
+                  <div style={{ fontSize: '10px', color: '#aaa' }}>磁矩: {fmt(mag.m)}</div>
+                  <div style={{ fontSize: '10px', color: '#aaa' }}>受力: {fmt(mag.f)}</div>
+                  <div style={{ fontSize: '10px', color: '#aaa' }}>力矩: {fmt(mag.tau)}</div>
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -645,7 +942,7 @@ export default function MagnetSimulator() {
             <div style={{ width: '16px', height: '3px', background: '#ffdd00' }} />
             <span>磁矩方向</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
             <div style={{ width: '16px', height: '3px', background: '#00ffff' }} />
             <span>受力方向</span>
           </div>
