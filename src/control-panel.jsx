@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import * as Three from './three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import RapierWorld from './rapier-world';
 import RAPIER from '@dimforge/rapier3d-compat';
 
@@ -80,7 +81,6 @@ export default function MagnetSimulator() {
   const [simSpeed, setSimSpeed] = useState(0.00002);
   const [rotateMoments, setRotateMoments] = useState(true);
   const [showVectors, setShowVectors] = useState(true);
-
   // Three.js refs
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
@@ -90,6 +90,7 @@ export default function MagnetSimulator() {
   const forceArrowsRef = useRef([]);
   const torqueArrowsRef = useRef([]);
   const animIdRef = useRef(null);
+  const controlsRef = useRef(null);
 
   // Rapier refs
   const [ready, setReady] = useState(false);
@@ -157,6 +158,17 @@ export default function MagnetSimulator() {
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
+    // OrbitControls - 鼠标控制视图
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.rotateSpeed = 0.5;
+    controls.zoomSpeed = 0.8;
+    controls.panSpeed = 0.5;
+    controls.minDistance = 2;
+    controls.maxDistance = 50;
+    controlsRef.current = controls;
+
     // Lights
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -183,6 +195,7 @@ export default function MagnetSimulator() {
         lastTime = time;
       }
 
+      controls.update();  // 更新控制器（damping需要）
       renderer.render(scene, camera);
     };
     animate(performance.now());
@@ -199,6 +212,7 @@ export default function MagnetSimulator() {
     return () => {
       window.removeEventListener('resize', onResize);
       cancelAnimationFrame(animIdRef.current);
+      controls.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
