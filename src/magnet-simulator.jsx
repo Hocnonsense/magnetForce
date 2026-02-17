@@ -1,14 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import * as Three from './three';
-import BuckyBall from './magnet-ball';
 import RapierWorld from './rapier-world';
 import RAPIER from '@dimforge/rapier3d-compat';
 
 // Physical constants for NdFeB N35
 const MAGNET_RADIUS = 0.0025; // 5mm diameter
-const BR = 1.2; // Tesla
-const MASS = 0.5e-3; // 0.5g
 
 // Simulation constants
 const VISUAL_SCALE = 100;
@@ -109,8 +106,7 @@ export default function MagnetSimulator() {
     RAPIER.init().then(() => {
       if (!mounted) return;
       console.log('✅ Rapier3D initialized');
-      const BUCKYBALL = new BuckyBall(MAGNET_RADIUS, BR, MASS, 200);
-      rapierWorldRef.current = new RapierWorld(RAPIER, BUCKYBALL);
+      rapierWorldRef.current = new RapierWorld(RAPIER, MAGNET_RADIUS);
       setReady(true);
     });
     return () => { mounted = false; };
@@ -122,21 +118,20 @@ export default function MagnetSimulator() {
     const rapierWorld = rapierWorldRef.current;
 
     if (!running || !rapierWorld || currentMagnets.length < 2) return;
-
     // 同步到 Rapier（仅在需要时）
     if (needsSyncRef.current) {
       rapierWorld.syncToRapier(currentMagnets);
       console.log('🔄 syncing to Rapier');
       needsSyncRef.current = false;
+      if (rapierWorld.bodies.size < 2) return;
+      const newMagnets = rapierWorld.step(currentMagnets, dt, rotate); // 物理步进
+      const bounded = newMagnets.map(mag => ({ // 边界约束
+        ...mag,
+        pos: mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p)))
+      }));
+      setMagnets(bounded);
+      stateRef.current.isSimulating = false; // 物理步进后暂停，等待下一次点击开始
     }
-
-    if (rapierWorld.bodies.size < 2) return;
-    const newMagnets = rapierWorld.step(currentMagnets, dt, rotate); // 物理步进
-    const bounded = newMagnets.map(mag => ({ // 边界约束
-      ...mag,
-      pos: mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p)))
-    }));
-    setMagnets(bounded);
   }, []);
 
   // Initialize Three.js

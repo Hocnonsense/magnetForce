@@ -1,5 +1,10 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as Three from './three';
+import BuckyBall from './magnet-ball';
+
+// 一个 N35 的磁球, 其充磁完成后, 表面磁感应强度约为 1.2T. 考虑小磁球可能充能不完全
+const BR = 1.0; // Tesla
+const MASS = 0.5e-3; // 0.5g
 
 // 接触状态
 const CONTACT_STATE = {
@@ -14,19 +19,20 @@ const CONTACT_STATE = {
 export default class RapierWorld {
   /**
    * @param {typeof RAPIER} rapier Rapier 库
-   * @param {import('./magnet-ball').default} ball 实例 (提供 calcForceAndTorque 方法)
    */
-  constructor(rapier, ball) {
+  constructor(rapier, radius_m = 0.0025) {
     this.RAPIER = rapier;
     this.world = new rapier.World({ x: 0, y: 0, z: 0 });
+    /** @type {Map<any, RAPIER.RigidBody>} */
     this.bodies = new Map();
     this.moments = new Map();
     this.contactStates = new Map();
     this.world.integrationParameters.numSolverIterations = 16;
 
-    this.ball = ball;
+    this.radius = radius_m;
+    this.shell_thickness = this.radius * 0.01;
+    this.ball = new BuckyBall(this.radius - this.shell_thickness, BR, MASS, 200);
     // 外壳厚度（镀层 + 弹性形变）
-    this.shell_thickness = this.ball.radius * 0.01;
   }
 
   syncToRapier(magnets) {
@@ -37,24 +43,19 @@ export default class RapierWorld {
       this.moments.delete(id);
     }
     for (const mag of magnets) {
-      let body = this.bodies.get(mag.id);
       const rigidBodyDesc = this.RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(mag.pos[0], mag.pos[1], mag.pos[2])
-        .setLinearDamping(0.3)
-        .setAngularDamping(0.3);
-
-      body = this.world.createRigidBody(rigidBodyDesc);
+        .setLinearDamping(0.5);
+      let body = this.world.createRigidBody(rigidBodyDesc);
       body.setLinvel({ x: mag.vel[0], y: mag.vel[1], z: mag.vel[2] }, true);
       body.setAngvel({ x: mag.omega[0], y: mag.omega[1], z: mag.omega[2] }, true);
 
       const colliderDesc = this.RAPIER.ColliderDesc.ball(this.ball.radius)
-        .setMass(this.ball.mass)
-        .setRestitution(0.0)
+        .setMass(MASS)
+        .setRestitution(0.01) // 恢复系数, 越小越不弹
         .setFriction(0.0);
-
       this.world.createCollider(colliderDesc, body);
       this.bodies.set(mag.id, body);
-
       this.moments.set(mag.id, [...mag.m]);
     }
   }
@@ -79,7 +80,6 @@ export default class RapierWorld {
         const ft = this.ball.calcForceAndTorque(
           [p2.x - p1.x, p2.y - p1.y, p2.z - p1.z], m1, m2
         )
-        ft.force1[0] + 1
 
         forces[i] = Three.Add(forces[i], ft.force1);
         forces[j] = Three.Add(forces[j], ft.force2);
@@ -95,18 +95,18 @@ export default class RapierWorld {
   }
 
   _getContactState(dist) {
-    const CONTACT_DIST = this.ball.radius * 2;
+    const CONTACT_DIST = this.radius * 2;
     if (dist <= CONTACT_DIST) {
       return CONTACT_STATE.HARD;
-    } else if (dist <= CONTACT_DIST + this.ball.radius * 0.01) {
-      return CONTACT_STATE.SHELL;
-    } else {
-      return CONTACT_STATE.NONE;
     }
+    if (dist <= CONTACT_DIST + this.shell_thickness) {
+      return CONTACT_STATE.SHELL;
+    }
+    return CONTACT_STATE.NONE;
   }
 
   _reportStateChange(idI, idJ, oldState, newState, dist) {
-    const penetration = this.ball.radius * 2 - dist;
+    const penetration = this.radius * 2 - dist;
     const distStr = (dist * 1000).toFixed(4);
     const penStr = (penetration * 1e6).toFixed(2);
 
@@ -126,7 +126,6 @@ export default class RapierWorld {
   }
 
   getContacts(magnets) {
-    const CONTACT_DIST = this.ball.radius * 2;
     const contacts = [];
     const n = magnets.length;
 
@@ -138,10 +137,8 @@ export default class RapierWorld {
 
         const p1 = body1.translation();
         const p2 = body2.translation();
-        const dx = p2.x - p1.x;
-        const dy = p2.y - p1.y;
-        const dz = p2.z - p1.z;
-        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const d = [p2.x - p1.x, p2.y - p1.y, p2.z - p1.z];
+        const dist = Three.Length(d);
 
         const key = this._contactKey(magnets[i].id, magnets[j].id);
         const newState = this._getContactState(dist);
@@ -152,12 +149,14 @@ export default class RapierWorld {
           this.contactStates.set(key, newState);
         }
 
-        if (dist <= CONTACT_DIST + this.ball.radius * 0.01 && dist > 1e-10) {
+        const penetration = this.radius * 2 - dist;
+        // 记录在外壳范围内的接触 (球1-shell-球2)，以供吸能处理
+        if (penetration >= - this.shell_thickness) {
           contacts.push({
             i, j,
-            normal: [dx / dist, dy / dist, dz / dist],
+            normal: Three.MultiplyScalar(d, 1 / dist),
             dist,
-            penetration: CONTACT_DIST - dist
+            penetration
           });
         }
       }
@@ -166,23 +165,23 @@ export default class RapierWorld {
     return contacts;
   }
 
-  computeConstrainedForces(magnets, forces, contacts) {
+  /**
+   * 根据相互接触的磁球对施加的力进行约束，防止穿透。
+   * 根据牛顿第三定律，接触的两球在法向方向上获得支持力。
+   */
+  computeConstrainedForces(forces, contacts) {
     const constrained = forces.map(f => [...f]);
-
     for (const { i, j, normal } of contacts) {
       const f1n = Three.Dot(forces[i], normal);
       const f2n = Three.Dot(forces[j], normal);
       const lambda = (f1n - f2n) / 2;
-
       if (lambda > 0) {
         constrained[i] = Three.Add(constrained[i], Three.MultiplyScalar(normal, lambda));
         constrained[j] = Three.Add(constrained[j], Three.MultiplyScalar(normal, -lambda));
       }
     }
-
     return constrained;
   }
-
   applyForces(magnets, forces) {
     for (let i = 0; i < magnets.length; i++) {
       const body = this.bodies.get(magnets[i].id);
@@ -194,7 +193,13 @@ export default class RapierWorld {
   }
 
   applyShellAbsorption(magnets, contacts) {
-    for (const { i, j, normal, penetration } of contacts) {
+    console.log(`🔨 Applying shell absorption for ${contacts.length} contacts...`);
+    console.log(`magnets: ${magnets.length}`);
+    for (const mag of magnets) {
+      console.log(`magnet ${mag.id}: pos=${mag.pos}, vel=${mag.vel}, omega=${mag.omega}`);
+    }
+    console.log(`contacts: ${contacts}`)
+    for (const { i, j, normal } of contacts) {
       const body1 = this.bodies.get(magnets[i].id);
       const body2 = this.bodies.get(magnets[j].id);
       if (!body1 || !body2) continue;
@@ -222,41 +227,16 @@ export default class RapierWorld {
           z: v2.z + (avgVn - v2n) * normal[2]
         }, true);
       }
-
-      // 位置修正
-      if (penetration > 0) {
-        const corr = penetration / 2 + 1e-9;
-        const p1 = body1.translation();
-        const p2 = body2.translation();
-
-        body1.setTranslation({
-          x: p1.x - corr * normal[0],
-          y: p1.y - corr * normal[1],
-          z: p1.z - corr * normal[2]
-        }, true);
-
-        body2.setTranslation({
-          x: p2.x + corr * normal[0],
-          y: p2.y + corr * normal[1],
-          z: p2.z + corr * normal[2]
-        }, true);
-      }
     }
   }
 
   step(magnets, dt, rotateMoments) {
-    // 1. 计算磁力
-    const { forces, torques } = this.calcForces(magnets);
-    // 2. 接触检测
-    const contacts = this.getContacts(magnets);
-    // 3. 约束力
-    const constrainedForces = this.computeConstrainedForces(magnets, forces, contacts);
-    // 4. 施加力
-    this.applyForces(magnets, constrainedForces);
-    // 5. 吸能（在积分前）
-    this.applyShellAbsorption(magnets, contacts);
-    // 6. Rapier 积分
-    this.world.integrationParameters.dt = dt;
+    const { forces, torques } = this.calcForces(magnets); // 1. 计算磁力
+    const contacts = this.getContacts(magnets); // 2. 接触检测
+    const constrainedForces = this.computeConstrainedForces(forces, contacts); // 3. 约束力
+    this.applyForces(magnets, constrainedForces); // 4. 施加力
+    this.applyShellAbsorption(magnets, contacts); // 5. 吸能（在积分前）
+    this.world.integrationParameters.dt = dt; // 6. Rapier 积分
     this.world.step();
     // 7. 再次吸能和修正（积分后可能产生新穿透）
     const contactsAfter = this.getContacts(magnets);
