@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import initRapierWorld from './rapier-world';
+import initMagnetWorld from './contact';
 
 // Physical constants for NdFeB N35
 const MAGNET_RADIUS = 0.0025; // 5mm diameter
@@ -92,39 +93,30 @@ export default function MagnetSimulator() {
 
   // Rapier refs
   const [ready, setReady] = useState(false);
-  /** @type {React.RefObject<import('./rapier-world').RapierWorld|null>} */
-  const rapierWorldRef = useRef(null);
   const needsSyncRef = useRef(true);
 
   // 状态 ref（每次渲染立即更新）
   const stateRef = useRef({ magnets, isSimulating, simSpeed, rotateMoments });
   stateRef.current = { magnets, isSimulating, simSpeed, rotateMoments };
 
-  // 初始化 Rapier
-  useEffect(initRapierWorld(rapierWorldRef, setReady, MAGNET_RADIUS), []);
+  /** @type {React.RefObject<import('./contact').MagnetPGSWorld|null>} */
+  const magnetWorldRef = useRef(null);
+  useEffect(initMagnetWorld(magnetWorldRef, setReady, MAGNET_RADIUS), []);
 
   // 物理步进
   const physicsStep = useCallback(() => {
     const { magnets: currentMagnets, isSimulating: running, simSpeed: dt, rotateMoments: rotate } = stateRef.current;
-    const rapierWorld = rapierWorldRef.current;
+    const magnetWorld = magnetWorldRef.current;
 
-    if (!running || !rapierWorld || currentMagnets.length < 2) return;
-    // 同步到 Rapier（仅在需要时）
-    if (needsSyncRef.current) {
-      rapierWorld.syncToRapier(currentMagnets);
-      console.log('🔄 syncing to Rapier');
-      needsSyncRef.current = false;
-    }
-    if (rapierWorld.bodies.size >= 2) {
-      const newMagnets = rapierWorld.step(dt, rotate); // 物理步进
-      const idToMag = new Map(currentMagnets.map((m, i) => [m.id, i]));
-      const bounded = newMagnets.map(mag => ({ // 边界约束
-        ...currentMagnets[idToMag.get(mag.id)],
-        ...mag,
-        pos: mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p)))
-      }));
-      setMagnets(bounded);
-    }
+    if (!running || !magnetWorld || currentMagnets.length < 2) return;
+    const { newMagnets, safedt } = magnetWorld.step(currentMagnets, dt); // 物理步进
+    const idToMag = new Map(currentMagnets.map((m, i) => [m.id, i]));
+    const bounded = newMagnets.map(mag => ({ // 边界约束
+      ...currentMagnets[idToMag.get(mag.id)],
+      ...mag,
+      pos: mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p)))
+    }));
+    setMagnets(bounded);
   }, []);
 
   useEffect(() => {
@@ -379,8 +371,8 @@ export default function MagnetSimulator() {
   };
 
   const loadPreset = (fn) => {
-    if (rapierWorldRef.current) {
-      rapierWorldRef.current.reset();
+    if (magnetWorldRef.current) {
+      magnetWorldRef.current.reset();
     }
     needsSyncRef.current = true;
     setMagnets(fn());
