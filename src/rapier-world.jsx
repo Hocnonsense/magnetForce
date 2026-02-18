@@ -2,7 +2,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as Three from './three';
 import BuckyBall from './magnet-ball';
 
-// 一个 N35 的磁球, 其充磁完成后, 表面磁感应强度约为 1.2T. 考虑小磁球可能充能不完全
+// 一个 N35 的磁球, 充分充磁后表面磁感应强度约为 1.2T. 这里考虑小磁球充能不完全
 const BR = 1.0; // Tesla
 const MASS = 0.5e-3; // 0.5g
 
@@ -14,9 +14,26 @@ const CONTACT_STATE = {
 };
 
 /**
+ * @param {React.RefObject<RapierWorld|null>} rapierWorldRef
+ * @param {number} MAGNET_RADIUS
+ */
+export default function initRapierWorld(rapierWorldRef, setReady, MAGNET_RADIUS) {
+  return () => {
+    let mounted = true;
+    RAPIER.init().then(() => {
+      if (!mounted) return;
+      console.log('✅ Rapier3D initialized');
+      rapierWorldRef.current = new RapierWorld(RAPIER, MAGNET_RADIUS);
+      setReady(true);
+    });
+    return () => { mounted = false; };
+  }
+}
+
+/**
  * Rapier 物理世界管理器
  */
-export default class RapierWorld {
+export class RapierWorld {
   /**
    * @param {typeof RAPIER} rapier Rapier 库
    */
@@ -30,13 +47,15 @@ export default class RapierWorld {
     this.world.integrationParameters.numSolverIterations = 16;
 
     this.radius = radius_m;
+    /** 允许 1% 长度形变 */
     this.shell_thickness = this.radius * 0.01;
     this.ball = new BuckyBall(this.radius - this.shell_thickness, BR, MASS, 200);
-    // 外壳厚度（镀层 + 弹性形变）
   }
 
+  /**
+   * update this.world, this.bodies, this.moments based on input magnets
+   */
   syncToRapier(magnets) {
-    // [TODO] 优化：增量更新而不是完全重建
     for (const [id, body] of this.bodies) {
       this.world.removeRigidBody(body);
       this.bodies.delete(id);
@@ -99,7 +118,7 @@ export default class RapierWorld {
     if (dist <= CONTACT_DIST) {
       return CONTACT_STATE.HARD;
     }
-    if (dist <= CONTACT_DIST + this.shell_thickness) {
+    if (dist <= CONTACT_DIST + this.shell_thickness * 2) {
       return CONTACT_STATE.SHELL;
     }
     return CONTACT_STATE.NONE;
@@ -166,18 +185,38 @@ export default class RapierWorld {
   }
 
   /**
-   * 根据相互接触的磁球对施加的力进行约束，防止穿透。
-   * 根据牛顿第三定律，接触的两球在法向方向上获得支持力。
+   * 用 PGS 方法同时求解所有接触约束力
+   * @param {number[][]} forces 原始磁力
+   * @param {Object[]} contacts 接触列表
+   * @param {number} iterations 迭代次数
+   * @returns {number[][]} 约束后的力
    */
-  computeConstrainedForces(forces, contacts) {
+  solveConstrainedForces(forces, contacts, iterations = 8) {
+    if (contacts.length === 0) return forces.map(f => [...f]);
+
     const constrained = forces.map(f => [...f]);
-    for (const { i, j, normal } of contacts) {
-      const f1n = Three.Dot(forces[i], normal);
-      const f2n = Three.Dot(forces[j], normal);
-      const lambda = (f1n - f2n) / 2;
-      if (lambda > 0) {
-        constrained[i] = Three.Add(constrained[i], Three.MultiplyScalar(normal, lambda));
-        constrained[j] = Three.Add(constrained[j], Three.MultiplyScalar(normal, -lambda));
+    const lambda = contacts.map(() => 0);
+
+    for (let iter = 0; iter < iterations; iter++) {
+      for (let k = 0; k < contacts.length; k++) {
+        const { i, j, normal } = contacts[k];
+
+        // 当前法向力分量
+        const f1n = Three.Dot(constrained[i], normal);
+        const f2n = Three.Dot(constrained[j], normal);
+
+        // 计算需要的 lambda 增量
+        // 目标：使法向力平衡 (f1n ≈ -f2n)
+        const deltaLambda = (f1n - f2n) / 2;
+
+        // 投影到非负（接触力只能推，不能拉）
+        const newLambda = Math.max(0, lambda[k] + deltaLambda);
+        const actualDelta = newLambda - lambda[k];
+        lambda[k] = newLambda;
+
+        // 立即更新力（Gauss-Seidel 风格）
+        constrained[i] = Three.Add(constrained[i], Three.MultiplyScalar(normal, -actualDelta));
+        constrained[j] = Three.Add(constrained[j], Three.MultiplyScalar(normal, actualDelta));
       }
     }
     return constrained;
@@ -192,55 +231,100 @@ export default class RapierWorld {
     }
   }
 
-  applyShellAbsorption(magnets, contacts) {
-    console.log(`🔨 Applying shell absorption for ${contacts.length} contacts...`);
-    console.log(`magnets: ${magnets.length}`);
-    for (const mag of magnets) {
-      console.log(`magnet ${mag.id}: pos=${mag.pos}, vel=${mag.vel}, omega=${mag.omega}`);
-    }
-    console.log(`contacts: ${contacts}`)
-    for (const { i, j, normal } of contacts) {
-      const body1 = this.bodies.get(magnets[i].id);
-      const body2 = this.bodies.get(magnets[j].id);
-      if (!body1 || !body2) continue;
+  /**
+   * 用 PGS 方法修正位置穿透
+   * @param {Object[]} magnets 磁球列表
+   * @param {Object[]} contacts 接触列表
+   * @param {number} iterations 迭代次数
+   */
+  solvePositions(magnets, contacts, iterations = 4) {
+    const TARGET_DIST = this.radius * 2;
+    const BAUMGARTE = 0.2; // 稳定因子，每次修正 20%
 
-      const v1 = body1.linvel();
-      const v2 = body2.linvel();
+    for (let iter = 0; iter < iterations; iter++) {
+      for (const { i, j } of contacts) {
+        const body1 = this.bodies.get(magnets[i].id);
+        const body2 = this.bodies.get(magnets[j].id);
+        if (!body1 || !body2) continue;
 
-      const v1n = v1.x * normal[0] + v1.y * normal[1] + v1.z * normal[2];
-      const v2n = v2.x * normal[0] + v2.y * normal[1] + v2.z * normal[2];
-      const relVn = v2n - v1n;
+        const p1 = body1.translation();
+        const p2 = body2.translation();
+        const d = [p2.x - p1.x, p2.y - p1.y, p2.z - p1.z];
+        const dist = Three.Length(d);
 
-      // 在外壳范围内清零法向相对速度
-      if (Math.abs(relVn) > 1e-12) {
-        const avgVn = (v1n + v2n) / 2;
+        if (dist < TARGET_DIST && dist > 1e-9) {
+          const penetration = TARGET_DIST - dist;
+          const normal = Three.MultiplyScalar(d, 1 / dist);
+          const correction = penetration * BAUMGARTE / 2;
 
-        body1.setLinvel({
-          x: v1.x + (avgVn - v1n) * normal[0],
-          y: v1.y + (avgVn - v1n) * normal[1],
-          z: v1.z + (avgVn - v1n) * normal[2]
-        }, true);
-
-        body2.setLinvel({
-          x: v2.x + (avgVn - v2n) * normal[0],
-          y: v2.y + (avgVn - v2n) * normal[1],
-          z: v2.z + (avgVn - v2n) * normal[2]
-        }, true);
+          body1.setTranslation({
+            x: p1.x - normal[0] * correction,
+            y: p1.y - normal[1] * correction,
+            z: p1.z - normal[2] * correction
+          }, true);
+          body2.setTranslation({
+            x: p2.x + normal[0] * correction,
+            y: p2.y + normal[1] * correction,
+            z: p2.z + normal[2] * correction
+          }, true);
+        }
       }
     }
   }
 
-  step(magnets, dt, rotateMoments) {
+  /**
+   * 用 PGS 方法修正速度（使接触球对的法向相对速度趋于零）
+   * @param {Object[]} magnets 磁球列表
+   * @param {Object[]} contacts 接触列表
+   * @param {number} iterations 迭代次数
+   */
+  solveVelocities(magnets, contacts, iterations = 4) {
+    for (let iter = 0; iter < iterations; iter++) {
+      for (const { i, j, normal } of contacts) {
+        const body1 = this.bodies.get(magnets[i].id);
+        const body2 = this.bodies.get(magnets[j].id);
+        if (!body1 || !body2) continue;
+
+        const v1 = body1.linvel();
+        const v2 = body2.linvel();
+
+        const v1n = v1.x * normal[0] + v1.y * normal[1] + v1.z * normal[2];
+        const v2n = v2.x * normal[0] + v2.y * normal[1] + v2.z * normal[2];
+        const relVn = v2n - v1n;
+
+        // 只处理相互靠近的情况 (relVn < 0 表示靠近)
+        if (relVn < -1e-9) {
+          const impulse = -relVn / 2;
+
+          body1.setLinvel({
+            x: v1.x - impulse * normal[0],
+            y: v1.y - impulse * normal[1],
+            z: v1.z - impulse * normal[2]
+          }, true);
+
+          body2.setLinvel({
+            x: v2.x + impulse * normal[0],
+            y: v2.y + impulse * normal[1],
+            z: v2.z + impulse * normal[2]
+          }, true);
+        }
+      }
+    }
+  }
+
+  step(dt, rotateMoments) {
+    const magnets = this.readFromRapier();
     const { forces, torques } = this.calcForces(magnets); // 1. 计算磁力
     const contacts = this.getContacts(magnets); // 2. 接触检测
-    const constrainedForces = this.computeConstrainedForces(forces, contacts); // 3. 约束力
+    const constrainedForces = this.solveConstrainedForces(forces, contacts, 8); // 3. 用 PGS 求解约束力
     this.applyForces(magnets, constrainedForces); // 4. 施加力
-    this.applyShellAbsorption(magnets, contacts); // 5. 吸能（在积分前）
-    this.world.integrationParameters.dt = dt; // 6. Rapier 积分
+    this.solveVelocities(magnets, contacts, 4); // 5. 积分前速度约束
+    // 6. Rapier 积分
+    this.world.integrationParameters.dt = dt;
     this.world.step();
-    // 7. 再次吸能和修正（积分后可能产生新穿透）
-    const contactsAfter = this.getContacts(magnets);
-    this.applyShellAbsorption(magnets, contactsAfter);
+    const contactsAfter = this.getContacts(magnets); // 7. 积分后再次检测接触并修正
+    this.solvePositions(magnets, contactsAfter, 4);
+    this.solveVelocities(magnets, contactsAfter, 4);
     // 8. 更新磁矩
     if (rotateMoments) {
       for (const mag of magnets) {
@@ -257,27 +341,23 @@ export default class RapierWorld {
       }
     }
     // 9. 返回状态
-    return this.readFromRapier(magnets, forces, torques);
+    const newMagnets = this.readFromRapier();
+    return newMagnets.map((mag, i) => ({ ...mag, f: forces[i], tau: torques[i] }));
   }
 
-  readFromRapier(magnets, forces, torques) {
-    return magnets.map((mag, i) => {
-      const body = this.bodies.get(mag.id);
-      if (!body) return mag;
-
+  readFromRapier() {
+    return Array.from(this.bodies.keys()).map((id, i) => {
+      const body = this.bodies.get(id);
       const pos = body.translation();
       const vel = body.linvel();
       const omega = body.angvel();
-      const m = this.moments.get(mag.id);
-
+      const m = this.moments.get(id);
       return {
-        ...mag,
+        id: id,
         pos: [pos.x, pos.y, pos.z],
         vel: [vel.x, vel.y, vel.z],
         omega: [omega.x, omega.y, omega.z],
-        m: m || mag.m,
-        f: forces?.[i] || [0, 0, 0],
-        tau: torques?.[i] || [0, 0, 0]
+        m: m || [0, 0, 0]
       };
     });
   }

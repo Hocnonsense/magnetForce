@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import * as Three from './three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import RapierWorld from './rapier-world';
-import RAPIER from '@dimforge/rapier3d-compat';
+import initRapierWorld from './rapier-world';
 
 // Physical constants for NdFeB N35
 const MAGNET_RADIUS = 0.0025; // 5mm diameter
@@ -48,7 +46,7 @@ const PRESETS = {
     ],
     vel: [0, 0, 0],
     omega: [0, 0, 0],
-    m: Three.Normalize([Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5]),
+    m: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().toArray(),
     color: i % 2 ? 0x4444ff : 0xff4444
   })),
   cube: () => {
@@ -81,7 +79,7 @@ export default function MagnetSimulator() {
   const [simSpeed, setSimSpeed] = useState(0.00002);
   const [rotateMoments, setRotateMoments] = useState(true);
   const [showVectors, setShowVectors] = useState(true);
-  // Three.js refs
+
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const rendererRef = useRef(null);
@@ -94,6 +92,7 @@ export default function MagnetSimulator() {
 
   // Rapier refs
   const [ready, setReady] = useState(false);
+  /** @type {React.RefObject<import('./rapier-world').RapierWorld|null>} */
   const rapierWorldRef = useRef(null);
   const needsSyncRef = useRef(true);
 
@@ -102,16 +101,7 @@ export default function MagnetSimulator() {
   stateRef.current = { magnets, isSimulating, simSpeed, rotateMoments };
 
   // 初始化 Rapier
-  useEffect(() => {
-    let mounted = true;
-    RAPIER.init().then(() => {
-      if (!mounted) return;
-      console.log('✅ Rapier3D initialized');
-      rapierWorldRef.current = new RapierWorld(RAPIER, MAGNET_RADIUS);
-      setReady(true);
-    });
-    return () => { mounted = false; };
-  }, []);
+  useEffect(initRapierWorld(rapierWorldRef, setReady, MAGNET_RADIUS), []);
 
   // 物理步进
   const physicsStep = useCallback(() => {
@@ -124,18 +114,19 @@ export default function MagnetSimulator() {
       rapierWorld.syncToRapier(currentMagnets);
       console.log('🔄 syncing to Rapier');
       needsSyncRef.current = false;
-      if (rapierWorld.bodies.size < 2) return;
-      const newMagnets = rapierWorld.step(currentMagnets, dt, rotate); // 物理步进
+    }
+    if (rapierWorld.bodies.size >= 2) {
+      const newMagnets = rapierWorld.step(dt, rotate); // 物理步进
+      const idToMag = new Map(currentMagnets.map((m, i) => [m.id, i]));
       const bounded = newMagnets.map(mag => ({ // 边界约束
+        ...currentMagnets[idToMag.get(mag.id)],
         ...mag,
         pos: mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p)))
       }));
       setMagnets(bounded);
-      stateRef.current.isSimulating = false; // 物理步进后暂停，等待下一次点击开始
     }
   }, []);
 
-  // Initialize Three.js
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !ready) return;
@@ -272,7 +263,7 @@ export default function MagnetSimulator() {
 
         if (mag.f) {
           const f = mag.f;
-          const fMag = Three.Length(f);
+          const fMag = new THREE.Vector3(...f).length();
 
           if (fMag > 1e-25) {
             const fDir = new THREE.Vector3(...f).normalize();
@@ -292,7 +283,7 @@ export default function MagnetSimulator() {
           // Torque arrow
           if (mag.tau) {
             const t = mag.tau;
-            const tMag = Three.Length(t);
+            const tMag = new THREE.Vector3(...t).length();
             if (tMag > 1e-25) {
               const tDir = new THREE.Vector3(...t).normalize();
               const tLen = VISUAL_RADIUS * Math.min(5, Math.max(0.4, Math.log10(tMag + 1e-10) + 8));
