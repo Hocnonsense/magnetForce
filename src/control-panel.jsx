@@ -3,69 +3,11 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import initRapierWorld from './rapier-world';
 import initMagnetWorld from './contact';
-
-// Physical constants for NdFeB N35
-const MAGNET_RADIUS = 0.0025; // 5mm diameter
+import { PRESETS, applyRadius } from './presets';
 
 // Simulation constants
 const VISUAL_SCALE = 100;
-const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
-const BOUND = 0.02;
-
-// Presets
-const PRESETS = {
-  pair: () => [
-    { id: 0, pos: [-0.0025, 0, 0], vel: [0, 0, 0], omega: [0, 0, 0], m: [1, 0, 0], color: 0xff4444 },
-    { id: 1, pos: [0.0025, 0, 0], vel: [0, 0, 0], omega: [0, 0, 0], m: [1, 0, 0], color: 0x4444ff }
-  ],
-  chain: () => Array.from({ length: 5 }, (_, i) => ({
-    id: i,
-    pos: [(i - 2) * MAGNET_RADIUS * 2 * 1.1, 0, 0],
-    vel: [0, 0, 0],
-    omega: [0, 0, 0],
-    m: [1, 0, 0],
-    color: i % 2 ? 0x4444ff : 0xff4444
-  })),
-  ring: () => Array.from({ length: 6 }, (_, i) => {
-    const a = (2 * Math.PI * i) / 6;
-    const ringRadius = MAGNET_RADIUS * 2 * 2;  // 10mm
-    return {
-      id: i,
-      pos: [ringRadius * Math.cos(a), ringRadius * Math.sin(a), 0],
-      vel: [0, 0, 0],
-      omega: [0, 0, 0],
-      m: [Math.cos(a + Math.PI / 2), Math.sin(a + Math.PI / 2), 0],
-      color: i % 2 ? 0x4444ff : 0xff4444
-    };
-  }),
-  random: () => Array.from({ length: 8 }, (_, i) => ({
-    id: i,
-    pos: [
-      (Math.random() - 0.5) * MAGNET_RADIUS * 2 * 10,
-      (Math.random() - 0.5) * MAGNET_RADIUS * 2 * 10,
-      (Math.random() - 0.5) * MAGNET_RADIUS * 2 * 4
-    ],
-    vel: [0, 0, 0],
-    omega: [0, 0, 0],
-    m: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().toArray(),
-    color: i % 2 ? 0x4444ff : 0xff4444
-  })),
-  cube: () => {
-    const halfSize = MAGNET_RADIUS * 2 * 1.2;
-    const positions = [
-      [-1, -1, -1], [1, -1, -1], [-1, 1, -1], [1, 1, -1],
-      [-1, -1, 1], [1, -1, 1], [-1, 1, 1], [1, 1, 1]
-    ];
-    return positions.map((p, i) => ({
-      id: i,
-      pos: p.map(x => x * halfSize),
-      vel: [0, 0, 0],
-      omega: [0, 0, 0],
-      m: [0, 0, i < 4 ? 1 : -1],
-      color: i < 4 ? 0xff4444 : 0x4444ff
-    }));
-  }
-};
+// Physical constants for NdFeB N35
 
 export default function MagnetSimulator() {
   // const res = new BuckyBall(MAGNET_RADIUS, BR, 200).calcForceAndTorque(
@@ -73,8 +15,12 @@ export default function MagnetSimulator() {
   // )
   // console.log('Force and Torque between two magnets:', res);
 
+  const MAGNET_RADIUS = 0.0025; // 5mm diameter
+  const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
+  const BOUND = 0.02;
+
   const containerRef = useRef(null);
-  const [magnets, setMagnets] = useState(PRESETS.pair());
+  const [magnets, setMagnets] = useState(applyRadius(PRESETS.pair(), MAGNET_RADIUS));
   const [selectedId, setSelectedId] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simSpeed, setSimSpeed] = useState(0.00002);
@@ -375,7 +321,7 @@ export default function MagnetSimulator() {
       magnetWorldRef.current.reset();
     }
     needsSyncRef.current = true;
-    setMagnets(fn());
+    setMagnets(applyRadius(fn(), MAGNET_RADIUS));
     setSelectedId(null);
     setIsSimulating(false);
   };
