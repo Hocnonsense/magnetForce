@@ -133,13 +133,4 @@ export default class BuckyBall {
     // console.log(`dt=${dt}, angle=${angle}, torque=${torque}, m=${m}, newM=${newM}, omega=${omega}, newOmega=${newOmega}`);
     return { m: Three.Normalize(newM), omega: newOmega };
   }
-
-  /** return { pos: newPos, vel: newVel } */
-  applyVelocity(pos, v, f, dt) {
-    // F = ma, a = F/m, dv = a * dt
-    const dv = Three.MultiplyScalar(f, dt / this.mass);
-    const newVel = Three.Add(Three.MultiplyScalar(v, DAMPING), dv);
-    const newPos = Three.Add(pos, Three.MultiplyScalar(newVel, dt));
-    return { pos: newPos, vel: newVel };
-  }
 }

@@ -43,6 +43,74 @@ export class MagnetPGSWorld {
     this.contactStates.clear();
   }
 
+  _contactKey(i, j) {
+    return i < j ? `${i},${j}` : `${j},${i}`;
+  }
+
+  _getContactState(dist) {
+    const CONTACT_DIST = this.radius * 2;
+    if (dist <= CONTACT_DIST - this.shellThickness) {
+      return CONTACT_STATE.HARD;
+    }
+    if (dist <= CONTACT_DIST + this.shellThickness) {
+      return CONTACT_STATE.SHELL;
+    }
+    return CONTACT_STATE.NONE;
+  }
+
+  _reportStateChange(i, j, dist) {
+    const key = this._contactKey(i, j);
+    const newState = this._getContactState(dist);
+    const oldState = this.contactStates.get(key) || CONTACT_STATE.NONE;
+
+    if (newState !== oldState) {
+      const penetration = this.radius * 2 - dist;
+      const distStr = (dist * 1000).toFixed(4);
+      const penStr = (penetration * 1e6).toFixed(2);
+
+      const stateEmoji = {
+        [CONTACT_STATE.NONE]: '⚪',
+        [CONTACT_STATE.SHELL]: '🟡',
+        [CONTACT_STATE.HARD]: '🔴'
+      };
+
+      console.log(
+        `%c${stateEmoji[oldState]} → ${stateEmoji[newState]} ` +
+        `球${i}-球${j}: ${oldState} → ${newState} ` +
+        `(dist=${distStr}mm, penetration=${penStr}μm)`,
+        newState === CONTACT_STATE.HARD ? 'color: red; font-weight: bold' :
+          newState === CONTACT_STATE.SHELL ? 'color: orange' : 'color: green'
+      );
+      this.contactStates.set(key, newState);
+    }
+  }
+
+  getContacts(magnetPos) {
+    const contacts = [];
+    const n = magnetPos.length;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const p1 = magnetPos[i];
+        const p2 = magnetPos[j];
+        const d = Three.DistanceTo(p1, p2);
+        const dist = Three.Length(d);
+
+        this._reportStateChange(i, j, dist);
+        const penetration = this.radius * 2 - dist;
+        // 记录在外壳范围内的接触 (球1-shell-球2)，以供吸能处理
+        if (penetration >= - this.shellThickness) {
+          contacts.push({
+            i, j,
+            normal: Three.MultiplyScalar(d, 1 / dist),
+            dist,
+            penetration
+          });
+        }
+      }
+    }
+    return contacts;
+  }
+
   /** 计算磁力（用内部存储的位置和磁矩） */
   calcMagneticForces(magnets) {
     const n = magnets.length;
@@ -64,104 +132,32 @@ export class MagnetPGSWorld {
     return { forces, torques };
   }
 
-  _contactKey(i, j) {
-    return i < j ? `${i},${j}` : `${j},${i}`;
-  }
-
-  _getContactState(dist) {
-    const CONTACT_DIST = this.radius * 2;
-    if (dist <= CONTACT_DIST - this.shellThickness) {
-      return CONTACT_STATE.HARD;
-    }
-    if (dist <= CONTACT_DIST + this.shellThickness) {
-      return CONTACT_STATE.SHELL;
-    }
-    return CONTACT_STATE.NONE;
-  }
-
-  _reportStateChange(idI, idJ, oldState, newState, dist) {
-    const penetration = this.radius * 2 - dist;
-    const distStr = (dist * 1000).toFixed(4);
-    const penStr = (penetration * 1e6).toFixed(2);
-
-    const stateEmoji = {
-      [CONTACT_STATE.NONE]: '⚪',
-      [CONTACT_STATE.SHELL]: '🟡',
-      [CONTACT_STATE.HARD]: '🔴'
-    };
-
-    console.log(
-      `%c${stateEmoji[oldState]} → ${stateEmoji[newState]} ` +
-      `球${idI}-球${idJ}: ${oldState} → ${newState} ` +
-      `(dist=${distStr}mm, penetration=${penStr}μm)`,
-      newState === CONTACT_STATE.HARD ? 'color: red; font-weight: bold' :
-        newState === CONTACT_STATE.SHELL ? 'color: orange' : 'color: green'
-    );
-  }
-
-  getContacts(magnetPos) {
-    const contacts = [];
-    const n = magnetPos.length;
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const p1 = magnetPos[i];
-        const p2 = magnetPos[j];
-        const d = Three.DistanceTo(p1, p2);
-        const dist = Three.Length(d);
-
-        const key = this._contactKey(i, j);
-        const newState = this._getContactState(dist);
-        const oldState = this.contactStates.get(key) || CONTACT_STATE.NONE;
-
-        if (newState !== oldState) {
-          this._reportStateChange(i, j, oldState, newState, dist);
-          this.contactStates.set(key, newState);
-        }
-
-        const penetration = this.radius * 2 - dist;
-        // 记录在外壳范围内的接触 (球1-shell-球2)，以供吸能处理
-        if (penetration >= - this.shellThickness) {
-          contacts.push({
-            i, j,
-            normal: Three.MultiplyScalar(d, 1 / dist),
-            dist,
-            penetration
-          });
-        }
-      }
-    }
-
-    return contacts;
-  }
-
   step(magnets, dt) {
     const DIST = this.radius * 2;
     const magnetPos = magnets.map(m => m.pos);
     // 1. 检测接触
-    const contacts = this.getContacts(magnetPos);
-    const fixedPos = fixOverlaps(magnetPos, contacts, DIST, this.shellThickness);
-    // 3. 计算磁力（语法修正）
+    const fixedPos = fixOverlaps(magnetPos, this.getContacts(magnetPos), DIST, this.shellThickness);
+    // 2. 计算磁力
     const { forces, torques } = this.calcMagneticForces(
       magnets.map((m, i) => ({ pos: fixedPos[i], moment: m.m, omega: m.omega }))
     );
-    // 4. 约束求解
+    // 3. 约束求解
     const { constrainedForces, constrainedVel } = solveClusterConstraints(
-      fixedPos, magnets.map(m => m.vel), forces, contacts
+      fixedPos, magnets.map(m => m.vel), forces, this.getContacts(fixedPos)
     );
-    // 5. 自适应时间步
+    // 4. 自适应时间步
     const { newPos, newVel, safedt } = this.safeStep(
       fixedPos, constrainedForces, constrainedVel, DIST, dt
     );
-    // 6. 后处理
-    const fixedPos2 = fixOverlaps(newPos, this.getContacts(newPos), DIST, this.shellThickness);
-    // 7. 更新旋转并打包输出
+    // 5. 后处理接触约束（修正重叠）
+    const fixedNewPos = fixOverlaps(newPos, this.getContacts(newPos), DIST, this.shellThickness);
+    // 6. 更新旋转
     const newMoments = this.rotateMoments(torques, magnets.map(m => ({ moment: m.m, omega: m.omega })), safedt);
-    // 确认 safedt 不是 undefined?
     return {
       newMagnets: magnets.map(
         (m, i) => ({
           ...m,
-          pos: fixedPos2[i],
+          pos: fixedNewPos[i],
           vel: newVel[i],
           f: constrainedForces[i],
           m: newMoments[i].moment,
@@ -214,43 +210,6 @@ export class MagnetPGSWorld {
     });
     return newMoments;
   }
-}
-
-/**
- * 计算两球间的碰撞时刻
- * @returns t_collision ∈ (0, dt] 或 null (无碰撞)
- */
-function detectCollisionTime(d, v1, v2, dt, contactDist) {
-  const dv = Three.DistanceTo(v1, v2); // 相对速度
-  const dist0 = Three.Length(d);
-  if (dist0 <= contactDist) {
-    return 0; // 已经接触
-  }
-
-  // |d0 + dv*t|² = (2R)²
-  // |dv|²·t² + 2(d0·dv)·t + (|d0|² - 4R²) = 0
-  const a = Three.Dot(dv, dv);
-  const b = 2 * Three.Dot(d, dv);
-  const c = dist0 * dist0 - contactDist * contactDist;
-
-  if (a < 1e-20) {
-    return null; // 相对静止，不会碰撞
-  }
-
-  const discriminant = b * b - 4 * a * c;
-  if (discriminant < 0) {
-    return null; // 无实根，不会碰撞
-  }
-
-  const sqrtD = Math.sqrt(discriminant);
-  const t1 = (-b - sqrtD) / (2 * a);
-  const t2 = (-b + sqrtD) / (2 * a);
-
-  // 取最小正根，且在 (0, dt] 内
-  // t1 <= t2 总是成立
-  if (t1 > 0 && t1 <= dt) return t1;
-  if (t2 > 0 && t2 <= dt) return t2;
-  return null;
 }
 
 /**
@@ -355,26 +314,6 @@ function solveClusterConstraints(positions, velocities, forces, contacts, iterat
     if (maxError < 1e-7) break; // 收敛检查
   }
   return { constrainedForces: cForces, constrainedVel: cVels };
-}
-
-function findClusters(n, contacts) {
-  // Union-Find
-  const find = (x) => {
-    if (parent[x] !== x) parent[x] = find(parent[x]);
-    return parent[x];
-  };
-  const parent = Array.from({ length: n }, (_, i) => i);
-  for (const { i, j, dist } of contacts) {
-    parent[find(i)] = find(j);
-  }
-  // 收集簇
-  const clusterMap = new Map();
-  for (let i = 0; i < n; i++) {
-    const root = find(i);
-    if (!clusterMap.has(root)) clusterMap.set(root, []);
-    clusterMap.get(root).push(i);
-  }
-  return Array.from(clusterMap.values());
 }
 
 /**
