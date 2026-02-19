@@ -160,6 +160,7 @@ export class MagnetPGSWorld {
           pos: fixedNewPos[i],
           vel: newVel[i],
           f: constrainedForces[i],
+          tau: torques[i],
           m: newMoments[i].moment,
           omega: newMoments[i].omega
         })
