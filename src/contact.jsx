@@ -1,6 +1,11 @@
 import * as Three from './three';
 import BuckyBall from './magnet-ball';
 import { solveQuartic } from './quartic-solver';
+import { modifyMagnet } from './magnet-type';
+/**
+ * @typedef {Three.Vec3} Vec3
+ * @typedef {import('./magnet-type').Magnet} Magnet
+ */
 
 // 一个 N35 的磁球, 充分充磁后表面磁感应强度约为 1.2T. 这里考虑小磁球充能不完全
 const BR = 1.0; // Tesla
@@ -132,6 +137,9 @@ export class MagnetPGSWorld {
     return { forces, torques };
   }
 
+  /**
+   * @param {Magnet[]} magnets
+   */
   step(magnets, dt) {
     const DIST = this.radius * 2;
     const magnetPos = magnets.map(m => m.pos);
@@ -155,8 +163,7 @@ export class MagnetPGSWorld {
     const newMoments = this.rotateMoments(torques, magnets.map(m => ({ moment: m.m, omega: m.omega })), safedt);
     return {
       newMagnets: magnets.map(
-        (m, i) => ({
-          ...m,
+        (m, i) => modifyMagnet(m, {
           pos: fixedNewPos[i],
           vel: newVel[i],
           f: constrainedForces[i],
@@ -174,7 +181,7 @@ export class MagnetPGSWorld {
     }
     const mass = this.ball.mass;
     const n = poses.length;
-    const accels = forces.map(f => Three.multiplyScalar([...f], 1 / mass));
+    const accels = forces.map(f => Three.multiplyScalar(Three.assertVec3([...f]), 1 / mass));
     const MIN_DIST = DIST - this.shellThickness;
     let safedt = dt;
     for (let i = 0; i < n; i++) {
@@ -225,7 +232,7 @@ export class MagnetPGSWorld {
  *
  * @param {Object[]} contacts 接触列表 [{i, j, dist}, ...]
  * @param {number} maxIter 最大迭代次数
- * @returns {number[][]} 修正后的位置
+ * @returns {Vec3[]} 修正后的位置
  */
 function fixOverlaps(positions, contacts, target, tolerance, maxIter = 20) {
   const pos = positions.map(p => [...p]);
@@ -328,10 +335,10 @@ function solveClusterConstraints(positions, velocities, forces, contacts, iterat
 /**
  * 求解两球碰撞时间（考虑加速度）
  *
- * @param {number[]} d0 初始相对位置 (p_j - p_i)
- * @param {number[]} dv 相对速度 (v_j - v_i)
- * @param {number[]} a1 球 i 的加速度
- * @param {number[]} a2 球 j 的加速度
+ * @param {Vec3} d0 初始相对位置 (p_j - p_i)
+ * @param {Vec3} dv 相对速度 (v_j - v_i)
+ * @param {Vec3} a1 球 i 的加速度
+ * @param {Vec3} a2 球 j 的加速度
  * @param {number} R 目标距离
  * @param {number} maxT 最大时间
  * @returns {number|null}

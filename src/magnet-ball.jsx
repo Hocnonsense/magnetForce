@@ -1,4 +1,7 @@
 import * as Three from "./three";
+/**
+ * @typedef {Three.Vec3} Vec3
+ */
 
 // ============================================
 // 物理常数
@@ -48,12 +51,19 @@ export default class BuckyBall {
     this.sample_q = this.sphere_samples.map(p => p[1] * q_factor)
     this.inertia = 0.4 * this.mass * (this.radius ** 2); // 球体转动惯量 (kg·m²)
 
+    /** @type {Vec3[]} */
     this._rotBuf1 = Array.from({ length: this.n_samples }, () => [0, 0, 0]);
+    /** @type {Vec3[]} */
     this._rotBuf2 = Array.from({ length: this.n_samples }, () => [0, 0, 0]);
+    /** @type {Vec3[]} */
     this._r2dBuf = Array.from({ length: this.n_samples }, () => [0, 0, 0]);
   }
 
   // 接受 out buffer，in-place 写入
+  /**
+   * @param {Vec3} dir 旋转后方向（单位向量）
+   * @param {Vec3[]} out 预分配的输出数组，长度至少为 this.n_samples，每项为 Vec3
+   */
   _rotateSphereSamplesTo = (dir, out) => {
     const cosTheta = dir[1]; // up=[0,1,0]，Dot(up,dir) = dir[1]
     const sinTheta2 = 1 - cosTheta * cosTheta;
@@ -91,35 +101,13 @@ export default class BuckyBall {
     }
   };
 
-  /**
-   * @return 旋转后的采样点数组, 保证外部修改无影响
-   */
-  rotateSphereSamples = (dir) => {
-    const cosTheta = Three.Dot([0, 1, 0], dir); // 防浮点溢出
-    const sinTheta2 = 1 - cosTheta * cosTheta;
-    // ✅ 情况1: 完全对齐 (无需旋转)
-    if (sinTheta2 < 1e-9) return cosTheta > 0 ? this.sphere_samples.map(p => [...p]) : this.sphere_samples.map(p => [-p[0], -p[1], -p[2]]);
-    // 计算旋转轴: up × dir = [dir[2], 0, -dir[0]] (因up=[0,1,0])
-    const sinTheta = Math.sqrt(sinTheta2);
-    const axis = Three.normalize([dir[2], 0, -dir[0]]);
-    // 对每个采样点独立应用旋转 (关键修复: 循环内计算每个点的叉积/点积)
-    return this.sphere_samples.map(p => {
-      const axisDotP = Three.Dot(axis, p);
-      const cross = Three.crossAddTo(axis, p, [0, 0, 0]);
-      cross[0] = p[0] * cosTheta + cross[0] * sinTheta + axis[0] * axisDotP * (1 - cosTheta);
-      cross[1] = p[1] * cosTheta + cross[1] * sinTheta + axis[1] * axisDotP * (1 - cosTheta);
-      cross[2] = p[2] * cosTheta + cross[2] * sinTheta + axis[2] * axisDotP * (1 - cosTheta);
-      return cross;
-    });
-  };
-
   // ============================================
   // 力和力矩计算（近场磁荷积分）
   // ============================================
   /**
-   * @param d 两个球心的相对位置 (r2 - r1)
-   * @param m1 球1的磁矩方向（需要保证为单位长度）
-   * @param m2 球2的磁矩方向（需要保证为单位长度）
+   * @param {Vec3} d 两个球心的相对位置 (r2 - r1)
+   * @param {Vec3} m1 球1的磁矩方向（需要保证为单位长度）
+   * @param {Vec3} m2 球2的磁矩方向（需要保证为单位长度）
    */
   calcForceAndTorque(d, m1, m2) {
     const R = this.radius;
@@ -140,9 +128,12 @@ export default class BuckyBall {
     }
     const r2d_arr = this._r2dBuf;
 
-    let F2 = [0, 0, 0];
-    let tau1 = [0, 0, 0];
-    let tau2 = [0, 0, 0];
+    /** @type {Vec3} */
+    const F2 = [0, 0, 0];
+    /** @type {Vec3} */
+    const tau1 = [0, 0, 0];
+    /** @type {Vec3} */
+    const tau2 = [0, 0, 0];
     for (let i = 0; i < this.n_samples; i++) {
       const r1 = r1_arr[i];
       const q1 = this.sample_q[i];
@@ -166,13 +157,20 @@ export default class BuckyBall {
     };
   }
 
-  /** return { moment: Three.normalize(newM), omega: newOmega } */
+  /**
+   * @param {Vec3} moment 当前磁矩方向（单位向量）
+   * @param {Vec3} omega 当前角速度
+   * @param {Vec3} torque 作用在磁矩上的力矩
+   * @param {number} dt  时间步长
+   * @return {{ moment: Vec3, omega: Vec3 }} 更新后的磁矩方向和角速度
+   */
   applyTorque(moment, omega, torque, dt) {
     const alpha = Three.multiplyScalar([...torque], 1 / this.inertia); // 角加速度
     // 检测是否在减速（力矩与角速度反向）
     const torqueDotOmega = Three.Dot(torque, omega);
     // 减速时用更强阻尼，加速时用弱阻尼
     const ANGULAR_DAMPING = torqueDotOmega < 0 ? DAMPING : 1;
+    /** @type {Vec3} */
     const newOmega = [ // 更新角速度: ω_new = (ω + α*dt)
       omega[0] * ANGULAR_DAMPING + alpha[0] * dt,
       omega[1] * ANGULAR_DAMPING + alpha[1] * dt,

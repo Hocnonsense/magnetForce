@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
+import { assertVec3 } from './three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import initRapierWorld from './rapier-world';
+import { createMagnet, modifyMagnet } from './magnet-type';
 import initMagnetWorld from './contact';
 import { PRESETS, applyRadius } from './presets';
 
@@ -155,7 +156,6 @@ export default function MagnetSimulator() {
           return; // 已到最旧
         }
         applySnap(hist[histIdxRef.current]);
-
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
         if (histIdxRef.current === -1) return;
@@ -170,7 +170,6 @@ export default function MagnetSimulator() {
         }
       }
     };
-
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [selectedId]);
@@ -184,10 +183,9 @@ export default function MagnetSimulator() {
     const { newMagnets, safedt } = magnetWorld.step(currentMagnets, dt); // 物理步进
     stepDeltaTimeRef.current = safedt;
     const idToMag = new Map(currentMagnets.map((m, i) => [m.id, i]));
-    const bounded = newMagnets.map(mag => ({ // 边界约束
-      ...currentMagnets[idToMag.get(mag.id)],
+    const bounded = newMagnets.map(mag => modifyMagnet(currentMagnets[idToMag.get(mag.id)], { // 边界约束
       ...mag,
-      pos: mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p)))
+      pos: assertVec3(mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p))))
     }));
     setMagnets(bounded);
     // 同批次更新 editDraft，避免 useEffect(magnets) 连锁触发
@@ -407,43 +405,12 @@ export default function MagnetSimulator() {
     }
   };
 
-  const rotateMoment = (axis) => {
-    if (selectedId === null) return;
-    needsSyncRef.current = true;
-    const angle = Math.PI / 6;
-    setMagnets(prev => prev.map(mag => {
-      if (mag.id !== selectedId) return mag;
-      const [x, y, z] = mag.m;
-      let newM;
-      if (axis === 'x') newM = [x, y * Math.cos(angle) - z * Math.sin(angle), y * Math.sin(angle) + z * Math.cos(angle)];
-      else if (axis === 'y') newM = [x * Math.cos(angle) + z * Math.sin(angle), y, -x * Math.sin(angle) + z * Math.cos(angle)];
-      else newM = [x * Math.cos(angle) - y * Math.sin(angle), x * Math.sin(angle) + y * Math.cos(angle), z];
-      const len = Math.sqrt(newM[0] ** 2 + newM[1] ** 2 + newM[2] ** 2);
-      return { ...mag, m: newM.map(v => v / len) };
-    }));
-  };
-
-  const moveMagnet = (dx, dy, dz = 0) => {
-    if (selectedId === null) return;
-    needsSyncRef.current = true;
-    setMagnets(prev => prev.map(mag =>
-      mag.id === selectedId
-        ? { ...mag, pos: [mag.pos[0] + dx, mag.pos[1] + dy, mag.pos[2] + dz], vel: [0, 0, 0] }
-        : mag
-    ));
-  };
-
   const addMagnet = () => {
     needsSyncRef.current = true;
-    const newId = Math.max(...magnets.map(m => m.id), -1) + 1;
-    setMagnets(prev => [...prev, {
-      id: newId,
+    setMagnets(prev => [...prev, createMagnet({
       pos: [(Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02, 0],
-      vel: [0, 0, 0],
-      m: [0, 0, 1],
-      omega: [0, 0, 0],
-      color: newId % 2 ? 0x4444ff : 0xff4444
-    }]);
+      color: Math.random() > 0.5 ? 0x4444ff : 0xff4444
+    })]);
   };
 
   const removeMagnet = () => {
@@ -470,11 +437,9 @@ export default function MagnetSimulator() {
 
   const perturbPositions = () => {
     needsSyncRef.current = true;
-    setMagnets(prev => prev.map(m => ({
-      ...m,
-      pos: m.pos.map(p => p + (Math.random() - 0.5) * 0.3 * MAGNET_RADIUS),
-      vel: [0, 0, 0]
-    })));
+    setMagnets(prev => prev.map(m => (modifyMagnet(m, {
+      pos: assertVec3(m.pos.map(p => p + (Math.random() - 0.5) * 0.3 * MAGNET_RADIUS)),
+    }))));
   };
 
   const updateUndoStackRef = (newMagnets) => {
@@ -627,7 +592,10 @@ export default function MagnetSimulator() {
 
           <div style={{ marginTop: '10px' }}>
             <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>
-              最大模拟速度: {simSpeed}×  当前速度: {stepDeltaTimeRef.current}s
+              最大模拟速度: {simSpeed}×
+            </div>
+            <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>
+              当前每帧时间步长: {stepDeltaTimeRef.current * 1000}ms
             </div>
             <input
               type="range"
