@@ -101,7 +101,7 @@ export class MagnetPGSWorld {
         if (penetration >= - this.shellThickness) {
           contacts.push({
             i, j,
-            normal: Three.MultiplyScalar(d, 1 / dist),
+            normal: Three.multiplyScalar(d, 1 / dist),
             dist,
             penetration
           });
@@ -123,10 +123,10 @@ export class MagnetPGSWorld {
           Three.DistanceTo(magnets[i].pos, magnets[j].pos),
           magnets[i].moment, magnets[j].moment
         )
-        forces[i] = Three.Add(forces[i], ft.force1);
-        forces[j] = Three.Add(forces[j], ft.force2);
-        torques[i] = Three.Add(torques[i], ft.torque1);
-        torques[j] = Three.Add(torques[j], ft.torque2);
+        Three.add(forces[i], ft.force1);
+        Three.add(forces[j], ft.force2);
+        Three.add(torques[i], ft.torque1);
+        Three.add(torques[j], ft.torque2);
       }
     }
     return { forces, torques };
@@ -174,30 +174,35 @@ export class MagnetPGSWorld {
     }
     const mass = this.ball.mass;
     const n = poses.length;
-    const accels = forces.map(f => Three.MultiplyScalar(f, 1 / mass));
+    const accels = forces.map(f => Three.multiplyScalar([...f], 1 / mass));
     const MIN_DIST = DIST - this.shellThickness;
     let safedt = dt;
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         const d0 = Three.DistanceTo(poses[i], poses[j]);
         const dv = Three.DistanceTo(vels[i], vels[j]);
-        const da = Three.DistanceTo(accels[i], accels[j]);
-        const tc = solveCollisionTime(d0, dv, da, MIN_DIST, safedt);
+        const tc = solveCollisionTime(d0, dv, accels[i], accels[j], MIN_DIST, safedt);
         if (tc !== null && tc < safedt) {
           safedt = Math.max(tc - 1e-12, 0);
         }
       }
     }
-    // 计算终态
-    const newPos = poses.map((p, i) =>
-      Three.Add(
-        Three.Add(p, Three.MultiplyScalar(vels[i], safedt)),
-        Three.MultiplyScalar(accels[i], 0.5 * safedt * safedt)
-      )
-    );
-    const newVel = vels.map((v, i) =>
-      Three.Add(v, Three.MultiplyScalar(accels[i], safedt))
-    );
+    const newPos = poses.map((p, i) => {
+      const dt = safedt, dt2 = 0.5 * safedt * safedt, v = vels[i], a = accels[i];
+      return [
+        p[0] + v[0] * dt + a[0] * dt2,
+        p[1] + v[1] * dt + a[1] * dt2,
+        p[2] + v[2] * dt + a[2] * dt2,
+      ]
+    });
+    const newVel = vels.map((v, i) => {
+      const dt = safedt, a = accels[i];
+      return [
+        v[0] + a[0] * dt,
+        v[1] + a[1] * dt,
+        v[2] + a[2] * dt,
+      ]
+    });
     return { newPos, newVel, safedt };
   }
 
@@ -207,7 +212,7 @@ export class MagnetPGSWorld {
       const moment = m.moment;
       const omega = m.omega;
       const result = this.ball.applyTorque(moment, omega, torque, dt);
-      return { moment: result.m, omega: result.omega };
+      return { moment: result.moment, omega: result.omega };
     });
     return newMoments;
   }
@@ -232,7 +237,7 @@ function fixOverlaps(positions, contacts, target, tolerance, maxIter = 20) {
     for (const { i, j } of contacts) {
       const d = Three.DistanceTo(pos[i], pos[j]);
       const dist = Three.Length(d);
-      const normal = Three.MultiplyScalar(d, 1 / dist);
+      const normal = Three.multiplyScalar(d, 1 / dist);
       let correction = 0;
       if (dist < HARD_MIN) {
         // 硬约束违反：必须修正到 TARGET
@@ -244,8 +249,9 @@ function fixOverlaps(positions, contacts, target, tolerance, maxIter = 20) {
         maxError = Math.max(maxError, target - dist);
       } // else if (dist >= TARGET) {不处理，让磁力自然吸引}
       if (correction > SOFT_TOLERANCE) {
-        pos[i] = Three.Add(pos[i], Three.MultiplyScalar(normal, -correction));
-        pos[j] = Three.Add(pos[j], Three.MultiplyScalar(normal, correction));
+        const pi = pos[i], pj = pos[j];
+        pi[0] -= normal[0] * correction; pi[1] -= normal[1] * correction; pi[2] -= normal[2] * correction;
+        pj[0] += normal[0] * correction; pj[1] += normal[1] * correction; pj[2] += normal[2] * correction;
       }
     }
     if (maxError < SOFT_TOLERANCE) break; // 收敛检查
@@ -268,7 +274,7 @@ function solveClusterConstraints(positions, velocities, forces, contacts, iterat
   for (const contact of contacts) {
     const d = Three.DistanceTo(positions[contact.i], positions[contact.j]);
     const dist = Three.Length(d);
-    contact.normal = Three.MultiplyScalar(d, 1 / dist);
+    contact.normal = Three.multiplyScalar(d, 1 / dist);
   }
   // PGS 迭代求解力约束
   for (let iter = 0; iter < iterations; iter++) {
@@ -286,8 +292,9 @@ function solveClusterConstraints(positions, velocities, forces, contacts, iterat
       if (lambda > 0) {
         maxError = Math.max(maxError, lambda);
         // 只施加"推开"的支持力，不施加"拉住"的力
-        cForces[i] = Three.Add(cForces[i], Three.MultiplyScalar(normal, -lambda));
-        cForces[j] = Three.Add(cForces[j], Three.MultiplyScalar(normal, lambda));
+        const cfi = cForces[i], cfj = cForces[j];
+        cfi[0] -= normal[0] * lambda; cfi[1] -= normal[1] * lambda; cfi[2] -= normal[2] * lambda;
+        cfj[0] += normal[0] * lambda; cfj[1] += normal[1] * lambda; cfj[2] += normal[2] * lambda;
       }
     }
     if (maxError < 1e-7) break; // 收敛检查
@@ -308,8 +315,9 @@ function solveClusterConstraints(positions, velocities, forces, contacts, iterat
         const deltaJ = avgVn - vJn;
         maxError = Math.max(maxError, Math.abs(deltaI) + Math.abs(deltaJ));
         // 只修正法向分量，保留切向
-        cVels[i] = Three.Add(cVels[i], Three.MultiplyScalar(normal, deltaI));
-        cVels[j] = Three.Add(cVels[j], Three.MultiplyScalar(normal, deltaJ));
+        const cvi = cVels[i], cvj = cVels[j];
+        cvi[0] += normal[0] * deltaI; cvi[1] += normal[1] * deltaI; cvi[2] += normal[2] * deltaI;
+        cvj[0] += normal[0] * deltaJ; cvj[1] += normal[1] * deltaJ; cvj[2] += normal[2] * deltaJ;
       }
     }
     if (maxError < 1e-7) break; // 收敛检查
@@ -322,13 +330,15 @@ function solveClusterConstraints(positions, velocities, forces, contacts, iterat
  *
  * @param {number[]} d0 初始相对位置 (p_j - p_i)
  * @param {number[]} dv 相对速度 (v_j - v_i)
- * @param {number[]} da 相对加速度 (a_j - a_i)
+ * @param {number[]} a1 球 i 的加速度
+ * @param {number[]} a2 球 j 的加速度
  * @param {number} R 目标距离
  * @param {number} maxT 最大时间
  * @returns {number|null}
  */
-function solveCollisionTime(d0, dv, da, R, maxT) {
-  const C = Three.MultiplyScalar(da, 0.5);
+function solveCollisionTime(d0, dv, a1, a2, R, maxT) {
+  const da = Three.DistanceTo(a1, a2);
+  const C = Three.multiplyScalar(da, 0.5);
   const c0 = Three.Dot(d0, d0) - R * R;
   if (c0 <= 0) return 0;  // 已接触
   const c1 = 2 * Three.Dot(d0, dv);

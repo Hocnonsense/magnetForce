@@ -1,7 +1,7 @@
 import * as Three from './three';
 
 export function applyRadius(magnets, radius) {
-  return magnets.map(m => ({ ...m, pos: Three.MultiplyScalar(m.pos, radius) }));
+  return magnets.map(m => ({ ...m, pos: Three.multiplyScalar(m.pos, radius) }));
 }
 
 // Presets
@@ -40,7 +40,7 @@ export const PRESETS = {
     vel: [0, 0, 0],
     omega: [0, 0, 0],
     //m: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().toArray(),
-    m: Three.Normalize([Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5]),
+    m: Three.normalize([Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5]),
     color: i % 2 ? 0x4444ff : 0xff4444
   })),
   cube: () => {
