@@ -4,7 +4,7 @@ import { assertVec3 } from './three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createMagnet, modifyMagnet } from './magnet-type';
 import initMagnetWorld from './contact';
-import { PRESETS, applyRadius } from './presets';
+import { applyRadius, loadPreset, listPresets } from './presets';
 
 // Simulation constants
 const VISUAL_SCALE = 100;
@@ -70,7 +70,6 @@ export default function MagnetSimulator() {
   const BOUND = 0.02;
 
   const containerRef = useRef(null);
-  const [magnets, setMagnets] = useState(applyRadius(PRESETS.pair(), MAGNET_RADIUS));
   const [selectedId, setSelectedId] = useState(null);
   const selectedIdRef = useRef(null);
   selectedIdRef.current = selectedId;
@@ -79,6 +78,7 @@ export default function MagnetSimulator() {
   const [rotateMoments, setRotateMoments] = useState(true);
   const [showVectors, setShowVectors] = useState(true);
   const stepDeltaTimeRef = useRef(0);
+  const [totalSimTime, setTotalSimTime] = useState(0);
 
   // Editable panel state
   const [editDraft, setEditDraft] = useState(null); // { pos: ['','',''], vel: ['','',''], m: ['','',''] }
@@ -95,6 +95,18 @@ export default function MagnetSimulator() {
   const animIdRef = useRef(null);
   const controlsRef = useRef(null);
 
+  const [presets, setPresets] = useState([]);
+  const [magnets, setMagnets] = useState([]);
+  useEffect(() => {
+    listPresets()
+      .then(names => {
+        setPresets(names);
+        // 加载第一个 preset 作为初始状态
+        return loadPreset(names[0], MAGNET_RADIUS);
+      })
+      .then(res => setMagnets(res.magnets))
+      .catch(err => console.error('Failed to load presets:', err));
+  }, []);
   // Rapier refs
   const [ready, setReady] = useState(false);
   const needsSyncRef = useRef(true);
@@ -115,8 +127,10 @@ export default function MagnetSimulator() {
     if (!mag) { setEditDraft(null); return; }
     setEditDraft({
       m_pos: mag.pos.map(p => p * 1000).map(fmt),
-      m_vel: (mag.vel ?? [0, 0, 0]).map(v => v * 1000).map(fmt),
+      m_vel: mag.vel.map(v => v * 1000).map(fmt),
       m: mag.m.map(fmt),
+      f: mag.f.map(fmt),
+      tau: mag.tau.map(fmt),
     });
   }, [selectedId]); // intentionally only on selection change
 
@@ -130,7 +144,7 @@ export default function MagnetSimulator() {
         if (mag) {
           setEditDraft({
             m_pos: mag.pos.map(p => p * 1000).map(fmt),
-            m_vel: (mag.vel ?? [0, 0, 0]).map(v => v * 1000).map(fmt),
+            m_vel: mag.vel.map(v => v * 1000).map(fmt),
             m: mag.m.map(fmt),
             f: (mag.f ?? [0, 0, 0]).map(fmt),
             tau: (mag.tau ?? [0, 0, 0]).map(fmt),
@@ -182,6 +196,7 @@ export default function MagnetSimulator() {
     if (!running || !magnetWorld || currentMagnets.length < 2) return;
     const { newMagnets, safedt } = magnetWorld.step(currentMagnets, dt); // 物理步进
     stepDeltaTimeRef.current = safedt;
+    setTotalSimTime(prev => prev + safedt);
     const idToMag = new Map(currentMagnets.map((m, i) => [m.id, i]));
     const bounded = newMagnets.map(mag => modifyMagnet(currentMagnets[idToMag.get(mag.id)], { // 边界约束
       ...mag,
@@ -256,14 +271,11 @@ export default function MagnetSimulator() {
     let lastTime = performance.now();
     const animate = (time) => {
       animIdRef.current = requestAnimationFrame(animate);
-
-      // Run physics at fixed timestep
       if (time - lastTime > 16) {
         needsSyncRef.current = true; // 标记需要同步
         physicsStep();
         lastTime = time;
       }
-
       controls.update();  // 更新控制器（damping需要）
       renderer.render(scene, camera);
     };
@@ -379,8 +391,7 @@ export default function MagnetSimulator() {
         }
       }
     });
-
-  }, [magnets, selectedId, showVectors]);
+  }, [magnets, selectedId, showVectors, ready]);
 
   // Mouse interaction
   const handleClick = (e) => {
@@ -411,6 +422,7 @@ export default function MagnetSimulator() {
       pos: [(Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02, 0],
       color: Math.random() > 0.5 ? 0x4444ff : 0xff4444
     })]);
+    setTotalSimTime(0);
   };
 
   const removeMagnet = () => {
@@ -418,6 +430,7 @@ export default function MagnetSimulator() {
     needsSyncRef.current = true;
     setMagnets(prev => prev.filter(m => m.id !== selectedId));
     setSelectedId(null);
+    setTotalSimTime(0);
   };
 
   const resetVelocities = () => {
@@ -425,7 +438,7 @@ export default function MagnetSimulator() {
     setMagnets(prev => prev.map(m => ({ ...m, vel: [0, 0, 0], omega: [0, 0, 0] })));
   };
 
-  const loadPreset = (fn) => {
+  const applyPreset = (fn) => {
     if (magnetWorldRef.current) {
       magnetWorldRef.current.reset();
     }
@@ -433,6 +446,7 @@ export default function MagnetSimulator() {
     setMagnets(applyRadius(fn(), MAGNET_RADIUS));
     setSelectedId(null);
     setIsSimulating(false);
+    setTotalSimTime(0);
   };
 
   const perturbPositions = () => {
@@ -597,6 +611,9 @@ export default function MagnetSimulator() {
             <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>
               当前每帧时间步长: {stepDeltaTimeRef.current * 1000}ms
             </div>
+            <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>
+              模拟总时间: {totalSimTime}s
+            </div>
             <input
               type="range"
               min="-6"      // 10⁻⁶ = 0.000001
@@ -627,10 +644,10 @@ export default function MagnetSimulator() {
         <div>
           <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>预设结构</div>
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {Object.entries(PRESETS).map(([name, fn]) => (
+            {presets.map(name => (
               <button
                 key={name}
-                onClick={() => loadPreset(fn)}
+                onClick={() => loadPreset(name, MAGNET_RADIUS).then(res => setMagnets(res.magnets))}
                 style={presetBtnStyle}
               >
                 {name}
@@ -758,15 +775,5 @@ const presetBtnStyle = {
   borderRadius: '4px',
   color: '#ccc',
   fontSize: '12px',
-  cursor: 'pointer'
-};
-
-const arrowBtnStyle = {
-  padding: '8px',
-  background: '#1a1a3a',
-  border: '1px solid #333',
-  borderRadius: '4px',
-  color: '#ccc',
-  fontSize: '14px',
   cursor: 'pointer'
 };

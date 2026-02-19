@@ -5,5 +5,10 @@
 !index.html
 !package.json
 !vite.config.js
+!jsconfig.json
+!public/
+!public/**/*.json
 
 node_modules/
+# auto-generated preset index
+public/presets.json

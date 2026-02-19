@@ -1,0 +1,16 @@
+{
+    "name": "pair",
+    "unit": "radius",
+    "magnets": [
+        {
+            "pos": "-1, 0, 0",
+            "moment": "1, 0, 0",
+            "color": "#ff4444"
+        },
+        {
+            "pos": "1, 0, 0",
+            "moment": "1, 0, 0",
+            "color": "#4444ff"
+        }
+    ]
+}
