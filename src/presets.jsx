@@ -17,6 +17,37 @@ const GROUP_COLORS = [
   '#ff44ff', '#44ffff', '#ff8844', '#aaffaa',
 ];
 
+
+/**
+ * @param {Magnet[]} magnets
+ * @param {string} name  preset 名（不含扩展名）
+ * @param {string} unit  单位（m, mm, cm, radius, diameter）
+ * @returns {string} 预设的 JSON 字符串
+ */
+export function exportJson(magnets, name = "preset", unit = "m") {
+  const data = {
+    name: name,
+    unit: unit,
+    magnets: magnets.map(m => {
+      const m1 = {
+        pos: m.pos.join(', '),
+        moment: m.m.join(', '),
+        ...(m.group ? { group: m.group } : {})
+      }
+      if (m.color === undefined) return m1;
+      return {
+        ...m1,
+        color: typeof m.color === 'number'
+          /** @ts-ignore */
+          ? `#${m.color.toString(16).padStart(6, '0')}`
+          : m.color
+      };
+    })
+  };
+  const json = JSON.stringify(data, null, 2);
+  return json;
+}
+
 /**
  * @param {string} text  TSV 文件内容
  */
@@ -128,7 +159,6 @@ export async function loadPreset(name, radius_m = 0.0025) {
     throw new Error(`Preset "${name}" is not valid JSON`);
   }
 }
-
 
 export async function listPresets() {
   const res = await fetch(`${import.meta.env.BASE_URL}presets.json`);

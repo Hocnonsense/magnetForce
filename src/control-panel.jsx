@@ -4,8 +4,7 @@ import { assertVec3 } from './three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createMagnet, modifyMagnet } from './magnet-type';
 import initMagnetWorld from './contact';
-import { applyRadius, loadPreset, listPresets } from './presets';
-import BuckyBall from './magnet-ball';
+import { applyRadius, loadPreset, listPresets, exportJson } from './presets';
 
 // Simulation constants
 const VISUAL_SCALE = 100;
@@ -291,6 +290,7 @@ export default function MagnetSimulator() {
       cancelAnimationFrame(animIdRef.current);
       controls.dispose();
       renderer.dispose();
+      sceneRef.current = null;
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
@@ -451,6 +451,25 @@ export default function MagnetSimulator() {
       pos: assertVec3(m.pos.map(p => p + (Math.random() - 0.5) * 0.3 * MAGNET_RADIUS)),
     }))));
   };
+
+  const exportMagnets = useCallback((mode) => {
+    const json = exportJson(magnets.map(
+      m => ({ ...m, pos: m.pos.map(p => p / MAGNET_RADIUS) })
+    ), "exported", "radius");
+    if (mode === 'copy') {
+      navigator.clipboard.writeText(json)
+        .then(() => alert('已复制到剪贴板'))
+        .catch(() => alert('复制失败，请手动复制'));
+    } else {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `magnets_${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  }, [magnets]);
 
   const updateUndoStackRef = (newMagnets) => {
     for (const historyMagnets of undoStackRef.current) {
@@ -636,6 +655,19 @@ export default function MagnetSimulator() {
           </label>
         </div>
 
+        {/* Add & Export */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button onClick={addMagnet} style={{ ...smallBtnStyle, flex: 1, background: '#1a3a1a', borderColor: '#2a5a2a' }}>
+            + 添加磁球
+          </button>
+          <button onClick={() => exportMagnets('download')} style={{ ...smallBtnStyle, flex: 1 }} title="下载 JSON">
+            ⬇ 导出
+          </button>
+          <button onClick={() => exportMagnets('copy')} style={{ ...smallBtnStyle, flex: 1 }} title="复制到剪贴板">
+            📋 复制
+          </button>
+        </div>
+
         {/* Presets */}
         <div>
           <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>预设结构</div>
@@ -719,13 +751,6 @@ export default function MagnetSimulator() {
             })()}
           </div>
         )}
-
-        {/* Add */}
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={addMagnet} style={{ ...smallBtnStyle, flex: 1, background: '#1a3a1a', borderColor: '#2a5a2a' }}>
-            + 添加磁球
-          </button>
-        </div>
 
         {/* Display Options */}
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
