@@ -1,0 +1,168 @@
+{
+  "name": "cube27",
+  "unit": "radius",
+  "magnets": [
+    {
+      "pos": "2, 2, -2",
+      "moment": "0, 1, 0",
+      "color": "#4444ff",
+      "group": "slice3"
+    },
+    {
+      "pos": "2, 0, -2",
+      "moment": "0, 1, 0",
+      "color": "#4444ff",
+      "group": "slice3"
+    },
+    {
+      "pos": "2, -2, -2",
+      "moment": "0, 1, 0",
+      "color": "#4444ff",
+      "group": "slice3"
+    },
+    {
+      "pos": "0, 2, -2",
+      "moment": "0, -1, 0",
+      "color": "#4444ff",
+      "group": "slice3"
+    },
+    {
+      "pos": "0, 0, -2",
+      "moment": "0, -1, 0",
+      "color": "#4444ff",
+      "group": "slice3"
+    },
+    {
+      "pos": "0, -2, -2",
+      "moment": "0, -1, 0",
+      "color": "#4444ff",
+      "group": "slice3"
+    },
+    {
+      "pos": "-2, 2, -2",
+      "moment": "0, 1, 0",
+      "color": "#4444ff",
+      "group": "slice3"
+    },
+    {
+      "pos": "-2, 0, -2",
+      "moment": "0, 1, 0",
+      "color": "#4444ff",
+      "group": "slice3"
+    },
+    {
+      "pos": "-2, -2, -2",
+      "moment": "0, 1, 0",
+      "color": "#4444ff",
+      "group": "slice3"
+    },
+    {
+      "pos": "2, 2, 0",
+      "moment": "0, -1, 0",
+      "color": "#44ff44",
+      "group": "slice2"
+    },
+    {
+      "pos": "2, 0, 0",
+      "moment": "0, -1, 0",
+      "color": "#44ff44",
+      "group": "slice2"
+    },
+    {
+      "pos": "2, -2, 0",
+      "moment": "0, -1, 0",
+      "color": "#44ff44",
+      "group": "slice2"
+    },
+    {
+      "pos": "0, 2, 0",
+      "moment": "0, 1, 0",
+      "color": "#44ff44",
+      "group": "slice2"
+    },
+    {
+      "pos": "0, 0, 0",
+      "moment": "0, 1, 0",
+      "color": "#44ff44",
+      "group": "slice2"
+    },
+    {
+      "pos": "0, -2, 0",
+      "moment": "0, 1, 0",
+      "color": "#44ff44",
+      "group": "slice2"
+    },
+    {
+      "pos": "-2, 2, 0",
+      "moment": "0, -1, 0",
+      "color": "#44ff44",
+      "group": "slice2"
+    },
+    {
+      "pos": "-2, 0, 0",
+      "moment": "0, -1, 0",
+      "color": "#44ff44",
+      "group": "slice2"
+    },
+    {
+      "pos": "-2, -2, 0",
+      "moment": "0, -1, 0",
+      "color": "#44ff44",
+      "group": "slice2"
+    },
+    {
+      "pos": "2, 2, 2",
+      "moment": "0, 1, 0",
+      "color": "#ff4444",
+      "group": "slice1"
+    },
+    {
+      "pos": "2, 0, 2",
+      "moment": "0, 1, 0",
+      "color": "#ff4444",
+      "group": "slice1"
+    },
+    {
+      "pos": "2, -2, 2",
+      "moment": "0, 1, 0",
+      "color": "#ff4444",
+      "group": "slice1"
+    },
+    {
+      "pos": "0, 2, 2",
+      "moment": "0, -1, 0",
+      "color": "#ff4444",
+      "group": "slice1"
+    },
+    {
+      "pos": "0, 0, 2",
+      "moment": "0, -1, 0",
+      "color": "#ff4444",
+      "group": "slice1"
+    },
+    {
+      "pos": "0, -2, 2",
+      "moment": "0, -1, 0",
+      "color": "#ff4444",
+      "group": "slice1"
+    },
+    {
+      "pos": "-2, 2, 2",
+      "moment": "0, 1, 0",
+      "color": "#ff4444",
+      "group": "slice1"
+    },
+    {
+      "pos": "-2, 0, 2",
+      "moment": "0, 1, 0",
+      "color": "#ff4444",
+      "group": "slice1"
+    },
+    {
+      "pos": "-2, -2, 2",
+      "moment": "0, 1, 0",
+      "color": "#ff4444",
+      "group": "slice1"
+    }
+  ]
+}

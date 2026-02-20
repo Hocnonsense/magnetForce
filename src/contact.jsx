@@ -79,13 +79,13 @@ export class MagnetPGSWorld {
         [CONTACT_STATE.HARD]: '🔴'
       };
 
-      console.log(
-        `%c${stateEmoji[oldState]} → ${stateEmoji[newState]} ` +
-        `球${i}-球${j}: ${oldState} → ${newState} ` +
-        `(dist=${distStr}mm, penetration=${penStr}μm)`,
-        newState === CONTACT_STATE.HARD ? 'color: red; font-weight: bold' :
-          newState === CONTACT_STATE.SHELL ? 'color: orange' : 'color: green'
-      );
+      // console.log(
+      //   `%c${stateEmoji[oldState]} → ${stateEmoji[newState]} ` +
+      //   `球${i}-球${j}: ${oldState} → ${newState} ` +
+      //   `(dist=${distStr}mm, penetration=${penStr}μm)`,
+      //   newState === CONTACT_STATE.HARD ? 'color: red; font-weight: bold' :
+      //     newState === CONTACT_STATE.SHELL ? 'color: orange' : 'color: green'
+      // );
       this.contactStates.set(key, newState);
     }
   }

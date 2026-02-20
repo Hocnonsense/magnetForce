@@ -166,7 +166,12 @@ export async function listPresets() {
   const fileNames = await res.json();
   // 内置 preset 作为补充，去重
   const builtinNames = Object.keys(PRESETS).filter(n => !fileNames.includes(n));
-  return [...fileNames, ...builtinNames];
+  const allNames = [...fileNames, ...builtinNames];
+  if ("pair" in allNames) {
+    // 确保最经典的 pair preset 始终可见
+    return ["pair", ...allNames.filter(n => n !== "pair")];
+  }
+  return allNames;
 }
 
 // Presets
