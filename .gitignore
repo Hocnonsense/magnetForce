@@ -4,6 +4,7 @@
 !src/**.css
 !index.html
 !package.json
+!package-lock.json
 !vite.config.js
 !jsconfig.json
 !public/
