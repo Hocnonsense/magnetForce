@@ -27,5 +27,6 @@ function presetsIndexPlugin() {
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/magnetForce/',
   plugins: [react(), presetsIndexPlugin()],
 });
