@@ -124,7 +124,7 @@ export class MagnetPGSWorld {
 
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
-        const ft = this.ball.calcForceAndTorque(
+        const ft = this.ball.calculateMagnet(
           Three.DistanceTo(magnets[i].pos, magnets[j].pos),
           magnets[i].moment, magnets[j].moment
         )

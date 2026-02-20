@@ -69,7 +69,7 @@ export function distanceTo(v1, v2) {
  * @return {number}
  */
 export function Length(v) {
-    return Math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2);
+    return Math.sqrt(Dot(v, v));
 }
 
 /** (x * scalar, y * scalar, z * scalar)

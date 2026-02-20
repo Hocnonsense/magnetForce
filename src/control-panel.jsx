@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createMagnet, modifyMagnet } from './magnet-type';
 import initMagnetWorld from './contact';
 import { applyRadius, loadPreset, listPresets } from './presets';
+import BuckyBall from './magnet-ball';
 
 // Simulation constants
 const VISUAL_SCALE = 100;
@@ -60,11 +61,6 @@ function EditRow({ field, label, color, editable, draft, setDraft, onCommit }) {
 }
 
 export default function MagnetSimulator() {
-  // const res = new BuckyBall(MAGNET_RADIUS, BR, 200).calcForceAndTorque(
-  //   [-0.0025, 0, 0], [1, 0, 0], [0.0025, 0, 0], [1, 0, 0]
-  // )
-  // console.log('Force and Torque between two magnets:', res);
-
   const MAGNET_RADIUS = 0.0025; // 5mm diameter
   const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
   const BOUND = 0.02;
