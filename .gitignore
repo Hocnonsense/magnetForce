@@ -11,5 +11,6 @@
 !public/**/*.json
 
 node_modules/
+dist/
 # auto-generated preset index
 public/presets.json
