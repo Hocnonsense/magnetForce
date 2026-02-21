@@ -1,0 +1,54 @@
+{
+  "name": "linecross6",
+  "unit": "radius",
+  "magnets": [
+    {
+      "pos": "-4.45, 0, 0",
+      "moment": "1, 0, 0",
+      "group": "layer1",
+      "color": "#ff4444"
+    },
+    {
+      "pos": "4.45, 0, 0",
+      "moment": "1, 0, 0",
+      "group": "layer1",
+      "color": "#ff4444"
+    },
+    {
+      "pos": "-2.45, 0, -0",
+      "moment": "1, 0, 0",
+      "group": "layer1",
+      "color": "#ff4444"
+    },
+    {
+      "pos": "-0.707, -1, 0",
+      "moment": "0.96, 0.27, 0",
+      "group": "layer1",
+      "color": "#ff4444"
+    },
+    {
+      "pos": "-0.707, 1, 0",
+      "moment": "0.96, -0.27, 0",
+      "group": "layer2",
+      "color": "#44ff44"
+    },
+    {
+      "pos": "0.707, 0, -1",
+      "moment": "0.96, 0, -0.27",
+      "group": "layer2",
+      "color": "#44ff44"
+    },
+    {
+      "pos": "0.707, 0, 1",
+      "moment": "0.96, 0, 0.27",
+      "group": "layer2",
+      "color": "#44ff44"
+    },
+    {
+      "pos": "2.45, 0, 0",
+      "moment": "1, 0, 0",
+      "group": "layer2",
+      "color": "#44ff44"
+    }
+  ]
+}
