@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { assertVec3 } from './three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createMagnet, modifyMagnet } from './magnet-type';
+import { createMagnet, modifyMagnet, reframeCoordinates as _reframeCoordinates } from './magnet-type';
 import initMagnetWorld from './contact';
 import { applyRadius, loadPreset, listPresets, exportJson } from './presets';
 
@@ -68,6 +68,7 @@ export default function MagnetSimulator() {
   const [selectedId, setSelectedId] = useState(null);
   const selectedIdRef = useRef(null);
   selectedIdRef.current = selectedId;
+  const [refYId, setRefYId] = useState(null); // [origin球, y方向参考球]
   const [isSimulating, setIsSimulating] = useState(false);
   const [simSpeed, setSimSpeed] = useState(0.00002);
   const [rotateMoments, setRotateMoments] = useState(true);
@@ -452,6 +453,16 @@ export default function MagnetSimulator() {
     }))));
   };
 
+  const reframeCoordinates = () => {
+    const newMagnets = _reframeCoordinates(magnets, selectedId, refYId);
+    if (!newMagnets) return;
+
+    updateUndoStackRef(magnets);
+    updateUndoStackRef(newMagnets);
+    needsSyncRef.current = true;
+    setMagnets(newMagnets);
+  };
+
   const exportMagnets = useCallback((mode) => {
     const json = exportJson(magnets.map(
       m => ({ ...m, pos: m.pos.map(p => p / MAGNET_RADIUS) })
@@ -617,6 +628,40 @@ export default function MagnetSimulator() {
             <button onClick={perturbPositions} style={smallBtnStyle}>
               扰动位置
             </button>
+          </div>
+
+          {/* 坐标重建 */}
+          <div style={{ padding: '10px', background: '#111122', borderRadius: '6px', border: '1px solid #2a2a44' }}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <select
+                value={refYId ?? ''}
+                onChange={e => {
+                  const val = e.target.value === '' ? null : parseInt(e.target.value);
+                  setRefYId(val);
+                }}
+                style={{
+                  flex: 1, background: '#0c0c1a', border: '1px solid #333',
+                  borderRadius: '3px', color: '#e0e0e0', fontSize: '11px',
+                  padding: '4px', outline: 'none'
+                }}
+              >
+                <option value="">— y 方向参考球 —</option>
+                {magnets.map(m => (
+                  <option key={m.id} value={m.id}>球 #{m.id}</option>
+                ))}
+              </select>
+              <button
+                onClick={reframeCoordinates}
+                disabled={selectedId === null || refYId === null || selectedId === refYId}
+                style={{
+                  ...smallBtnStyle,
+                  opacity: (selectedId !== null && refYId !== null && selectedId !== refYId) ? 1 : 0.4,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                坐标变换
+              </button>
+            </div>
           </div>
 
           <div style={{ marginTop: '10px' }}>

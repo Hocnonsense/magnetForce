@@ -153,3 +153,34 @@ export function inspectMagnets(magnets, { frame, digits = 4 } = {}) {
   magnets.forEach(m => inspectMagnet(m, { digits }));
   console.groupEnd();
 }
+
+
+/**
+ * @param {Magnet[]} magnets
+ * @returns {Magnet[]|undefined}  - 返回新数组，原数组不变；输入不合法时返回 undefined
+ */
+export function reframeCoordinates(magnets, selectedId, refYId) {
+  if (selectedId === null || refYId === null || selectedId === refYId) return;
+  const mag1 = magnets.find(m => m.id === selectedId);
+  const mag2 = magnets.find(m => m.id === refYId);
+  if (!mag1 || !mag2) return;
+
+  // 新基底构造（Gram-Schmidt）
+  const xHat = Three.normalize([...mag1.m]);                          // mag1 磁轴方向
+  const rel = Three.DistanceTo(mag1.pos, mag2.pos);                   // mag2 相对 mag1 的位移
+  const yHat = Three.normalize(Three.add(rel, Three.multiplyScalar(xHat, -Three.Dot(rel, xHat)))); // 去除 x 分量
+  if (Math.hypot(...yHat) < 0.5) { alert('两球连线与磁轴平行，无法确定 y 方向'); return; }
+  const zHat = Three.Cross(xHat, yHat);
+  // 旋转矩阵 R（行向量 = 新轴在旧坐标下的表示）→ R * v 将旧坐标向量变换到新坐标
+  const R = [xHat, yHat, zHat];
+  const rot = (/** @type {Vec3} */ v) => Three.assertVec3(R.map(row => Three.Dot(row, v)));
+  const origin = mag1.pos;
+
+  return (magnets.map(m => modifyMagnet(m, {
+    pos: rot(Three.DistanceTo(origin, m.pos)),
+    vel: rot(m.vel ?? [0, 0, 0]),
+    m: rot(m.m),
+    f: rot(m.f ?? [0, 0, 0]),
+    tau: rot(m.tau ?? [0, 0, 0]),
+  })));
+};
