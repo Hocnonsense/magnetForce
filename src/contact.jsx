@@ -367,7 +367,7 @@ function solveClusterConstraints(positions, velocities, forces, contacts, fixedF
     }
     if (maxError < SOFT_TOLERANCE) break;
   }
-  // PGS 迭代求解速度约束
+  // PGS 迭代求解接触面法向速度约束
   for (let iter = 0; iter < iterations; iter++) {
     let maxError = 0;
     for (const { i, j, normal } of contacts) {
@@ -395,6 +395,29 @@ function solveClusterConstraints(positions, velocities, forces, contacts, fixedF
       }
     }
     if (maxError < SOFT_TOLERANCE) break; // 收敛检查
+  }
+  // 切向摩擦：简单模型，切向速度减半
+  for (const { i, j, normal, penetration } of contacts) {
+    if (penetration < 0) continue; // 未接触，无摩擦
+    const iFixed = _fixedFlags[i], jFixed = _fixedFlags[j];
+    // 分别处理每个球自身的切向速度
+    for (const [k, isFixed] of [[i, iFixed], [j, jFixed]]) {
+      if (isFixed) continue;
+      const v = cVels[k];
+      // 切向速度 = 总速度 - 法向分量
+      const vn = Three.Dot(v, normal);
+      const vTan = [
+        v[0] - normal[0] * vn,
+        v[1] - normal[1] * vn,
+        v[2] - normal[2] * vn,
+      ];
+      const tanSpeed = Math.hypot(...vTan);
+      if (tanSpeed < 1e-12) continue;
+      // 摩擦力方向与切向速度相反 → 切向速度减半
+      v[0] -= vTan[0] * 0.5;
+      v[1] -= vTan[1] * 0.5;
+      v[2] -= vTan[2] * 0.5;
+    }
   }
   return { constrainedForces: cForces, constrainedVel: cVels };
 }
