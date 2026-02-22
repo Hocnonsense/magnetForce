@@ -4,11 +4,11 @@ import { assertVec3 } from './three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createMagnet, modifyMagnet, reframeCoordinates as _reframeCoordinates } from './magnet-type';
 import initMagnetWorld from './contact';
-import { applyRadius, loadPreset, listPresets, exportJson } from './presets';
+import { loadPreset, listPresets, exportJson } from './presets';
 
 // Simulation constants
 const VISUAL_SCALE = 100;
-// Physical constants for NdFeB N35
+const ANIMATE_DT = 32; // 32ms ~ 30fps
 
 /** @type {React.CSSProperties} */
 const EDIT_ROW_STYLE = {
@@ -62,7 +62,7 @@ function EditRow({ field, label, color, editable, draft, setDraft, onCommit }) {
 export default function MagnetSimulator() {
   const MAGNET_RADIUS = 0.0025; // 5mm diameter
   const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
-  const BOUND = 0.02;
+  const BOUND = 0.1;
 
   const containerRef = useRef(null);
   const [selectedId, setSelectedId] = useState(null);
@@ -72,8 +72,10 @@ export default function MagnetSimulator() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [simSpeed, setSimSpeed] = useState(0.00002);
   const [rotateMoments, setRotateMoments] = useState(true);
+  // 是否考虑重力
+  const [useGravity, setUseGravity] = useState(true);
   const [showVectors, setShowVectors] = useState(true);
-  const stepDeltaTimeRef = useRef(0);
+  const stepDeltaTimeRef = useRef('');
   const [totalSimTime, setTotalSimTime] = useState(0);
 
   // Editable panel state
@@ -108,8 +110,8 @@ export default function MagnetSimulator() {
   const needsSyncRef = useRef(true);
 
   // 状态 ref（每次渲染立即更新）
-  const stateRef = useRef({ magnets, isSimulating, simSpeed, rotateMoments });
-  stateRef.current = { magnets, isSimulating, simSpeed, rotateMoments };
+  const stateRef = useRef({ magnets, isSimulating, simSpeed, rotateMoments, useGravity });
+  stateRef.current = { magnets, isSimulating, simSpeed, rotateMoments, useGravity };
 
   /** @type {React.RefObject<import('./contact').MagnetPGSWorld|null>} */
   const magnetWorldRef = useRef(null);
@@ -129,7 +131,6 @@ export default function MagnetSimulator() {
       tau: mag.tau.map(fmt),
     });
   }, [selectedId]); // intentionally only on selection change
-
   // Arrow key history navigation
   useEffect(() => {
     const applySnap = (snap) => {
@@ -151,7 +152,6 @@ export default function MagnetSimulator() {
 
     const handler = (e) => {
       const hist = undoStackRef.current;
-
       if (e.key === 'ArrowUp') {
         e.preventDefault();
         if (hist.length === 0) return;
@@ -186,16 +186,17 @@ export default function MagnetSimulator() {
 
   // 物理步进
   const physicsStep = useCallback(() => {
-    const { magnets: currentMagnets, isSimulating: running, simSpeed: dt, rotateMoments: rotate } = stateRef.current;
+    const { magnets: currentMagnets, isSimulating: running, simSpeed: dt, rotateMoments: rotate, useGravity: useG } = stateRef.current;
     const magnetWorld = magnetWorldRef.current;
 
     if (!running || !magnetWorld || currentMagnets.length < 2) return;
-    const { newMagnets, safedt } = magnetWorld.step(currentMagnets, dt); // 物理步进
-    stepDeltaTimeRef.current = safedt;
+    const { newMagnets, safedt, forces, reason } = magnetWorld.step(currentMagnets, dt, useG);
+    stepDeltaTimeRef.current = `${safedt * 1000}ms (${reason})`;
     setTotalSimTime(prev => prev + safedt);
     const idToMag = new Map(currentMagnets.map((m, i) => [m.id, i]));
-    const bounded = newMagnets.map(mag => modifyMagnet(currentMagnets[idToMag.get(mag.id)], { // 边界约束
+    const bounded = newMagnets.map((mag, i) => modifyMagnet(currentMagnets[idToMag.get(mag.id)], { // 边界约束
       ...mag,
+      id: i,
       pos: assertVec3(mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p))))
     }));
     setMagnets(bounded);
@@ -267,7 +268,7 @@ export default function MagnetSimulator() {
     let lastTime = performance.now();
     const animate = (time) => {
       animIdRef.current = requestAnimationFrame(animate);
-      if (time - lastTime > 16) {
+      if (time - lastTime > ANIMATE_DT) {
         needsSyncRef.current = true; // 标记需要同步
         physicsStep();
         lastTime = time;
@@ -435,12 +436,12 @@ export default function MagnetSimulator() {
     setMagnets(prev => prev.map(m => ({ ...m, vel: [0, 0, 0], omega: [0, 0, 0] })));
   };
 
-  const applyPreset = (fn) => {
+  const applyPreset = (name) => {
     if (magnetWorldRef.current) {
       magnetWorldRef.current.reset();
     }
     needsSyncRef.current = true;
-    setMagnets(applyRadius(fn(), MAGNET_RADIUS));
+    loadPreset(name, MAGNET_RADIUS).then(res => setMagnets(res.magnets))
     setSelectedId(null);
     setIsSimulating(false);
     setTotalSimTime(0);
@@ -669,7 +670,7 @@ export default function MagnetSimulator() {
               最大模拟速度: {simSpeed}×
             </div>
             <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>
-              当前每帧时间步长: {stepDeltaTimeRef.current * 1000}ms
+              当前每帧时间步长: {stepDeltaTimeRef.current}
             </div>
             <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>
               模拟总时间: {totalSimTime}s
@@ -698,6 +699,15 @@ export default function MagnetSimulator() {
             />
             <span style={{ fontSize: '12px', color: '#aaa' }}>允许磁矩旋转</span>
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={useGravity}
+              onChange={e => setUseGravity(e.target.checked)}
+              style={{ accentColor: '#4488ff' }}
+            />
+            <span style={{ fontSize: '12px', color: '#aaa' }}>重力 (y 方向)</span>
+          </label>
         </div>
 
         {/* Add & Export */}
@@ -720,7 +730,7 @@ export default function MagnetSimulator() {
             {presets.map(name => (
               <button
                 key={name}
-                onClick={() => loadPreset(name, MAGNET_RADIUS).then(res => setMagnets(res.magnets))}
+                onClick={() => applyPreset(name)}
                 style={presetBtnStyle}
               >
                 {name}
@@ -763,7 +773,21 @@ export default function MagnetSimulator() {
               >
                 {isSimulating ? '⏸ 暂停模拟' : '▶ 开始模拟'}
               </button>
-              {/* 需要美化: 按钮缩小并位置靠右 */}
+              <button
+                onClick={() => {
+                  needsSyncRef.current = true;
+                  setMagnets(prev => prev.map(m =>
+                    m.id === selectedId ? { ...m, fixed: !m.fixed } : m
+                  ));
+                }}
+                style={{
+                  ...smallBtnStyle, flex: 1,
+                  background: magnets.find(m => m.id === selectedId)?.fixed ? '#2a1a4a' : '#1a1a2a',
+                  borderColor: magnets.find(m => m.id === selectedId)?.fixed ? '#6a3aaa' : '#333',
+                }}
+              >
+                {magnets.find(m => m.id === selectedId)?.fixed ? '📌 已固定' : '📌 固定'}
+              </button>
               <button
                 onClick={removeMagnet}
                 disabled={selectedId === null}

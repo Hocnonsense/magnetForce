@@ -20,10 +20,11 @@ let _nextId = 0;
  * **输出字段**（由 MagnetPGSWorld.step() 写入，首帧前可能为 undefined）:
  * @property {Vec3}   [f]    - 合力（含约束修正后），单位 N
  * @property {Vec3}   [tau]  - 合力矩，单位 N·m
+ * @property {boolean} [fixed]  - 是否被固定
  */
 
 const REQUIRED_VEC3 = /** @type {(keyof Magnet)[]} */ (['pos', 'vel', 'm', 'omega']);
-const OPTIONAL_VEC3 = /** @type {(keyof Magnet)[]} */ (['f', 'tau']);
+const OPTIONAL_VEC3 = /** @type {(keyof Magnet)[]} */ (['f', 'tau', 'fixed']);
 
 /** @returns {Magnet} */
 export function createMagnet(init = {}) {
@@ -37,6 +38,7 @@ export function createMagnet(init = {}) {
     group: init.group ?? '',
     f: [0, 0, 0],
     tau: [0, 0, 0],
+    fixed: init.fixed ?? false,
   };
 }
 
