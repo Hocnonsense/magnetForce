@@ -196,7 +196,10 @@ export default function MagnetSimulator() {
     const idToMag = new Map(currentMagnets.map((m, i) => [m.id, i]));
     const bounded = newMagnets.map((mag, i) => modifyMagnet(currentMagnets[idToMag.get(mag.id)], { // 边界约束
       ...mag,
-      pos: assertVec3(mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p))))
+      pos: assertVec3(mag.pos.map(p => {
+        if (Math.abs(p) > BOUND) throw new Error(`球${i}超出边界: pos=${mag.pos.map(v => (v * 1000).toFixed(1)).join(',')}mm`);
+        return Math.max(Math.min(p, BOUND), -BOUND);
+      }))
     }));
     setMagnets(bounded);
     // 同批次更新 editDraft，避免 useEffect(magnets) 连锁触发
@@ -812,7 +815,7 @@ export default function MagnetSimulator() {
                 <>
                   <EditRow field="m_pos" label="位置 (mm)" color="#88ccff" editable={!isSimulating} {...rowProps} />
                   <EditRow field="m_vel" label="速度 (mm/s)" color="#88ffcc" editable={!isSimulating} {...rowProps} />
-                  <EditRow field="m" label="磁矩 (方向)" color="#ffdd00" editable={!isSimulating} {...rowProps} />
+                  <EditRow field="moment" label="磁矩 (方向)" color="#ffdd00" editable={!isSimulating} {...rowProps} />
                   <EditRow field="f" label="受力 (N)" color="#00ffff" editable={false} {...rowProps} />
                   <EditRow field="tau" label="力矩 (N·m)" color="#ff00ff" editable={false} {...rowProps} />
                 </>
