@@ -1,4 +1,4 @@
-import * as Three from './utils/three';
+import * as Three from '../utils/three';
 import { createMagnet } from './magnet-type';
 
 /**

@@ -1,5 +1,5 @@
-import * as Three from './utils/three.jsx';
-import { getRot } from './utils/coordinates.jsx';
+import * as Three from '../utils/three.jsx';
+import { getRot } from '../utils/coordinates.jsx';
 /**
  * @typedef {Three.Vec3} Vec3
  */

@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import initMagnetWorld from './contact';
-import { reframeCoordinates as _reframeCoordinates, createMagnet, modifyMagnet, resetMagnetIdCounter } from './magnet-type';
-import { exportJson, listPresets, loadPreset } from './presets';
+import { reframeCoordinates as _reframeCoordinates, createMagnet, modifyMagnet, resetMagnetIdCounter } from './data/magnet-type';
+import { exportJson, listPresets, loadPreset } from './data/presets';
 import { assertVec3 } from './utils/three';
 
 // Simulation constants

@@ -1,11 +1,11 @@
 import * as Three from './utils/three';
 import BuckyBall from './magnet-ball';
 import { solveQuartic } from './utils/quartic-solver';
-import { modifyMagnet } from './magnet-type';
+import { modifyMagnet } from './data/magnet-type';
 
 /**
  * @typedef {Three.Vec3} Vec3
- * @typedef {import('./magnet-type').Magnet} Magnet
+ * @typedef {import('./data/magnet-type').Magnet} Magnet
  */
 
 // 一个 N35 的磁球, 充分充磁后表面磁感应强度约为 1.2T. 这里考虑小磁球充能不完全
