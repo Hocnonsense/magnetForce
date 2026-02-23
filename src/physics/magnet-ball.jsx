@@ -1,4 +1,4 @@
-import * as Three from "./utils/three";
+import * as Three from "../utils/three";
 /**
  * @typedef {Three.Vec3} Vec3
  */
