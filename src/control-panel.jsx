@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { assertVec3 } from './three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createMagnet, modifyMagnet, reframeCoordinates as _reframeCoordinates } from './magnet-type';
 import initMagnetWorld from './contact';
-import { loadPreset, listPresets, exportJson } from './presets';
+import { reframeCoordinates as _reframeCoordinates, createMagnet, modifyMagnet, resetMagnetIdCounter } from './magnet-type';
+import { exportJson, listPresets, loadPreset } from './presets';
+import { assertVec3 } from './utils/three';
 
 // Simulation constants
 const VISUAL_SCALE = 100;
@@ -70,7 +70,7 @@ export default function MagnetSimulator() {
   selectedIdRef.current = selectedId;
   const [refYId, setRefYId] = useState(null); // [origin球, y方向参考球]
   const [isSimulating, setIsSimulating] = useState(false);
-  const [simSpeed, setSimSpeed] = useState(0.00002);
+  const [simSpeed, setSimSpeed] = useState(0.0002);  // 0.2ms per step, quick and not too unstable
   const [rotateMoments, setRotateMoments] = useState(true);
   // 是否考虑重力
   const [useGravity, setUseGravity] = useState(true);
@@ -126,7 +126,7 @@ export default function MagnetSimulator() {
     setEditDraft({
       m_pos: mag.pos.map(p => p * 1000).map(fmt),
       m_vel: mag.vel.map(v => v * 1000).map(fmt),
-      m: mag.m.map(fmt),
+      moment: mag.moment.map(fmt),
       f: mag.f.map(fmt),
       tau: mag.tau.map(fmt),
     });
@@ -142,7 +142,7 @@ export default function MagnetSimulator() {
           setEditDraft({
             m_pos: mag.pos.map(p => p * 1000).map(fmt),
             m_vel: mag.vel.map(v => v * 1000).map(fmt),
-            m: mag.m.map(fmt),
+            moment: mag.moment.map(fmt),
             f: (mag.f ?? [0, 0, 0]).map(fmt),
             tau: (mag.tau ?? [0, 0, 0]).map(fmt),
           });
@@ -158,7 +158,7 @@ export default function MagnetSimulator() {
         if (histIdxRef.current === -1) {
           // 保存当前未提交状态作为最新一条
           const cur = stateRef.current.magnets;
-          hist.push(cur.map(m => ({ ...m, pos: [...m.pos], vel: [...m.vel], m: [...m.m] })));
+          hist.push(cur.map(m => ({ ...m, pos: [...m.pos], vel: [...m.vel], moment: [...m.moment] })));
           histIdxRef.current = hist.length - 2; // 跳到上一条
         } else if (histIdxRef.current > 0) {
           histIdxRef.current--;
@@ -196,7 +196,6 @@ export default function MagnetSimulator() {
     const idToMag = new Map(currentMagnets.map((m, i) => [m.id, i]));
     const bounded = newMagnets.map((mag, i) => modifyMagnet(currentMagnets[idToMag.get(mag.id)], { // 边界约束
       ...mag,
-      id: i,
       pos: assertVec3(mag.pos.map(p => Math.max(-BOUND, Math.min(BOUND, p))))
     }));
     setMagnets(bounded);
@@ -209,7 +208,7 @@ export default function MagnetSimulator() {
           ...d,
           m_pos: mag.pos.map(p => p * 1000).map(fmt),
           m_vel: (mag.vel ?? [0, 0, 0]).map(v => v * 1000).map(fmt),
-          m: mag.m.map(fmt),
+          moment: mag.moment.map(fmt),
           f: (mag.f ?? [0, 0, 0]).map(fmt),
           tau: (mag.tau ?? [0, 0, 0]).map(fmt),
         } : d);
@@ -337,7 +336,7 @@ export default function MagnetSimulator() {
         const arrowHeadLength = VISUAL_RADIUS * 0.5;
         const arrowHeadWidth = VISUAL_RADIUS * 0.3;
 
-        const dir = new THREE.Vector3(...mag.m).normalize();
+        const dir = new THREE.Vector3(...mag.moment).normalize();
         const origin = new THREE.Vector3(...scaled);
         const arrow = new THREE.ArrowHelper(
           dir, origin,
@@ -441,6 +440,7 @@ export default function MagnetSimulator() {
       magnetWorldRef.current.reset();
     }
     needsSyncRef.current = true;
+    resetMagnetIdCounter(); // 确保预设加载的磁球 ID 从 0 开始连续
     loadPreset(name, MAGNET_RADIUS).then(res => setMagnets(res.magnets))
     setSelectedId(null);
     setIsSimulating(false);
@@ -501,7 +501,7 @@ export default function MagnetSimulator() {
       if (same) return; // 不添加重复历史
     }
     undoStackRef.current.push(
-      newMagnets.map(m => ({ ...m, pos: [...m.pos], vel: [...m.vel], m: [...m.m] }))
+      newMagnets.map(m => ({ ...m, pos: [...m.pos], vel: [...m.vel], moment: [...m.moment] }))
     );
     if (undoStackRef.current.length > 100) undoStackRef.current.shift();
   };

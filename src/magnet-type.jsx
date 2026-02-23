@@ -1,9 +1,14 @@
-import * as Three from './three.jsx';
+import * as Three from './utils/three.jsx';
+import { getRot } from './utils/coordinates.jsx';
 /**
  * @typedef {Three.Vec3} Vec3
  */
 
 let _nextId = 0;
+export function resetMagnetIdCounter() {
+  _nextId = 0;
+}
+
 /**
  * 单个磁球的完整状态对象。
  *
@@ -12,7 +17,7 @@ let _nextId = 0;
  * @property {number}  id     - 唯一整数标识符（由 presets 分配，仿真期间不变）
  * @property {Vec3}    pos    - 位置，单位 m
  * @property {Vec3}    vel    - 线速度，单位 m/s
- * @property {Vec3}    m      - 磁矩方向向量（模 = |m|，A·m²；仿真中通常已归一化后由 BuckyBall 缩放）
+ * @property {Vec3}    moment - 磁矩方向向量（模 = |m|，A·m²；仿真中通常已归一化后由 BuckyBall 缩放）
  * @property {Vec3}    omega  - 角速度，单位 rad/s（用于磁矩旋转积分）
  * @property {string}  color  - 用于渲染的颜色字符串（如 '#ff0000' 或 0xff0000）
  * @property {string}  group  - 可选的分组标签, 可能用于整体移动或旋转
@@ -32,7 +37,7 @@ export function createMagnet(init = {}) {
     id: init.id ?? _nextId++, // @ts-ignore
     pos: init.pos ? [...init.pos] : [0, 0, 0], // @ts-ignore
     vel: init.vel ? [...init.vel] : [0, 0, 0], // @ts-ignore
-    m: init.m ? [...init.m] : [1, 0, 0], // @ts-ignore
+    moment: init.moment ? [...init.moment] : [1, 0, 0], // @ts-ignore
     omega: init.omega ? [...init.omega] : [0, 0, 0],
     color: init.color ?? '#93b5c9',
     group: init.group ?? '',
@@ -132,7 +137,7 @@ export function inspectMagnet(mag, { digits = 4 } = {}) {
     `┌─ Magnet #${mag.id} ─────────────────────────────────────┐\n` +
     `│  pos   (m)      ${f(mag.pos)}\n` +
     `│  vel   (m/s)    ${f(mag.vel)}\n` +
-    `│  m     (A·m²)   ${f(mag.m)}\n` +
+    `│  m     (A·m²)   ${f(mag.moment)}\n` +
     `│  omega (rad/s)  ${f(mag.omega)}\n` +
     `│  f     (N)      ${f(mag.f)}\n` +
     `│  tau   (N·m)    ${f(mag.tau)}\n` +
@@ -156,7 +161,6 @@ export function inspectMagnets(magnets, { frame, digits = 4 } = {}) {
   console.groupEnd();
 }
 
-
 /**
  * @param {Magnet[]} magnets
  * @returns {Magnet[]|undefined}  - 返回新数组，原数组不变；输入不合法时返回 undefined
@@ -166,22 +170,13 @@ export function reframeCoordinates(magnets, selectedId, refYId) {
   const mag1 = magnets.find(m => m.id === selectedId);
   const mag2 = magnets.find(m => m.id === refYId);
   if (!mag1 || !mag2) return;
-
-  // 新基底构造（Gram-Schmidt）
-  const xHat = Three.normalize([...mag1.m]);                          // mag1 磁轴方向
-  const rel = Three.DistanceTo(mag1.pos, mag2.pos);                   // mag2 相对 mag1 的位移
-  const yHat = Three.normalize(Three.add(rel, Three.multiplyScalar(xHat, -Three.Dot(rel, xHat)))); // 去除 x 分量
-  if (Math.hypot(...yHat) < 0.5) { alert('两球连线与磁轴平行，无法确定 y 方向'); return; }
-  const zHat = Three.Cross(xHat, yHat);
-  // 旋转矩阵 R（行向量 = 新轴在旧坐标下的表示）→ R * v 将旧坐标向量变换到新坐标
-  const R = [xHat, yHat, zHat];
-  const rot = (/** @type {Vec3} */ v) => Three.assertVec3(R.map(row => Three.Dot(row, v)));
+  const rot = getRot(Three.normalize([...mag1.moment]), Three.DistanceTo(mag1.pos, mag2.pos));
+  if (!rot) return;
   const origin = mag1.pos;
-
   return (magnets.map(m => modifyMagnet(m, {
     pos: rot(Three.DistanceTo(origin, m.pos)),
     vel: rot(m.vel ?? [0, 0, 0]),
-    m: rot(m.m),
+    moment: rot(m.moment),
     f: rot(m.f ?? [0, 0, 0]),
     tau: rot(m.tau ?? [0, 0, 0]),
   })));

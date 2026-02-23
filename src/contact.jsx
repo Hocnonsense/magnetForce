@@ -1,8 +1,8 @@
-import * as Three from './three';
+import * as Three from './utils/three';
 import BuckyBall from './magnet-ball';
-import { solveQuartic } from './quartic-solver';
+import { solveQuartic } from './utils/quartic-solver';
 import { modifyMagnet } from './magnet-type';
-import { int } from 'three/tsl';
+
 /**
  * @typedef {Three.Vec3} Vec3
  * @typedef {import('./magnet-type').Magnet} Magnet
@@ -154,7 +154,7 @@ export class MagnetPGSWorld {
     const fixedPos = fixOverlaps(magnetPos, this.getContacts(magnetPos), DIST, this.shellThickness, fixedFlags);
     // 2. 计算磁力
     const { coforces, torques, forces } = this.calcMagneticForces(
-      magnets.map((m, i) => ({ pos: fixedPos[i], moment: m.m }))
+      magnets.map((m, i) => ({ pos: fixedPos[i], moment: m.moment }))
     );
     // 3. 叠加重力（固定球不受重力影响积分，但支持力会通过约束传递）
     if (gravity) {
@@ -180,7 +180,7 @@ export class MagnetPGSWorld {
       if (c.dist < this.radius) throw new Error(`球${c.i}-球${c.j}重叠过深: dist=${(c.dist * 1000).toFixed(4)}mm`)
     });
     // 7. 更新旋转
-    const newMoments = this.rotateMoments(torques, magnets.map(m => ({ moment: m.m, omega: m.omega })), safedt);
+    const newMoments = this.rotateMoments(torques, magnets.map(m => ({ moment: m.moment, omega: m.omega })), safedt);
     return {
       newMagnets: magnets.map(
         (m, i) => modifyMagnet(m, {
@@ -188,7 +188,7 @@ export class MagnetPGSWorld {
           vel: newVel[i],
           f: constrainedForces[i],
           tau: torques[i],
-          m: newMoments[i].moment,
+          moment: newMoments[i].moment,
           omega: newMoments[i].omega
         })
       ), safedt, forces, reason
@@ -202,7 +202,7 @@ export class MagnetPGSWorld {
    */
   safeStep(poses, forces, vels, DIST, dt, fixedFlags = null) {
     if (dt < 1e-12) {
-      return { newPos: poses.map(p => [...p]), newVel: vels.map(v => [...v]), safedt: 0 };
+      return { newPos: poses.map(p => [...p]), newVel: vels.map(v => [...v]), safedt: 0, reason: 'zero delta time' };
     }
     const _fixedFlags = fixedFlags || poses.map(() => false);
     const mass = this.ball.mass;

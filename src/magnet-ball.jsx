@@ -1,4 +1,4 @@
-import * as Three from "./three";
+import * as Three from "./utils/three";
 /**
  * @typedef {Three.Vec3} Vec3
  */
@@ -152,7 +152,7 @@ export default class BuckyBall {
         const dist = Math.max(Three.Length(rd), minDist);
         const q2 = this.sample_q[j];
         const forceMag = PREFACTOR * q1 * q2 / (dist ** 2);
-        const f = Three.multiplyScalar(rd, forceMag / dist);
+        const f = Three.multiplyScalar(rd, forceMag / dist);  // rd is discarded now, reuse it
         Three.add(F2, f);
         Three.crossAddTo(r2_arr[j], f, tor2);
         Three.crossAddTo(r1, Three.multiplyScalar(f, -1), tor1);

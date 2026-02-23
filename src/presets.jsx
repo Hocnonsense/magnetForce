@@ -1,4 +1,4 @@
-import * as Three from './three';
+import * as Three from './utils/three';
 import { createMagnet } from './magnet-type';
 
 /**
@@ -31,7 +31,7 @@ export function exportJson(magnets, name = "preset", unit = "m") {
     magnets: magnets.map(m => {
       const m1 = {
         pos: m.pos.join(', '),
-        moment: m.m.join(', '),
+        moment: m.moment.join(', '),
         ...(m.group ? { group: m.group } : {})
       }
       if (m.color === undefined) return m1;
@@ -100,6 +100,8 @@ export function parsePresetTSV(text) {
 }
 
 /**
+ * 解析预设 JSON，支持磁矩的字符串格式（如 "0, 1, 0"）以方便编辑。
+ * 仅提取必要字段，不进行完整校验或生成新 id。
  * @returns {{ name: string, unit: string, magnets }}
  * @example
  *
@@ -123,10 +125,10 @@ export function parsePresetJson(text) {
   for (const m of data.magnets) {
     const processed = {};
     for (const [key, val] of Object.entries(m)) {
-      processed[key === 'moment' ? 'm' : key] = tryUnpackVec3(val);
+      processed[key] = tryUnpackVec3(val);
     }
     Three.assertVec3(processed.pos);
-    Three.assertVec3(Three.normalize(processed.m));
+    Three.assertVec3(Three.normalize(processed.moment));
     magnets.push(processed);
   }
   return { name, unit, magnets };
@@ -167,7 +169,7 @@ export async function listPresets() {
   // 内置 preset 作为补充，去重
   const builtinNames = Object.keys(PRESETS).filter(n => !fileNames.includes(n));
   const allNames = [...fileNames, ...builtinNames];
-  if ("pair" in allNames) {
+  if (allNames.includes("pair")) {
     // 确保最经典的 pair preset 始终可见
     return ["pair", ...allNames.filter(n => n !== "pair")];
   }
