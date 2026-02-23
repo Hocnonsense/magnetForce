@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { reframeCoordinates as _reframeCoordinates, createMagnet, modifyMagnet, resetMagnetIdCounter } from './data/magnet-type';
 import { exportJson, listPresets, loadPreset } from './data/presets';
-import initMagnetWorld from './physics/contact';
+import initMagnetWorld from './physics/world';
 import { assertVec3 } from './utils/three';
 
 // Simulation constants
@@ -113,7 +113,7 @@ export default function MagnetSimulator() {
   const stateRef = useRef({ magnets, isSimulating, simSpeed, rotateMoments, useGravity });
   stateRef.current = { magnets, isSimulating, simSpeed, rotateMoments, useGravity };
 
-  /** @type {React.RefObject<import('./physics/contact').MagnetPGSWorld|null>} */
+  /** @type {React.RefObject<import('./physics/world').MagnetPGSWorld|null>} */
   const magnetWorldRef = useRef(null);
   useEffect(initMagnetWorld(magnetWorldRef, setReady, MAGNET_RADIUS), []);
 
