@@ -112,7 +112,7 @@ export function normalize(v) {
     return multiplyScalar(v, 1 / len);
 }
 
-/** (x1 * x2, y1 * y2, z1 * z2)
+/** (x1 * x2 + y1 * y2 + z1 * z2)
  * @param {Vec3} v1
  * @param {Vec3} v2
  * @return {number}

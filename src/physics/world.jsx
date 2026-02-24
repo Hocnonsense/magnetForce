@@ -86,7 +86,8 @@ export class MagnetPGSWorld {
     }
     // 4. 约束求解（固定球提供支持力）
     const { constrainedForces, constrainedVel } = solveClusterConstraints(
-      fixedPos, coforces, magnets.map(m => m.vel), getContacts(fixedPos, DIST, this.params.shellThickness), fixedFlags
+      fixedPos, coforces, magnets.map(m => m.vel),
+      getContacts(fixedPos, DIST, this.params.shellThickness), fixedFlags, this.params.friction
     );
     // 5. 自适应时间步（固定球跳过积分）
     const { newPos, newVel, safedt, reason } = safeMove(

@@ -96,96 +96,146 @@ export function fixOverlaps(
  * @param {Vec3[]} forces
  * @param {Vec3[]} velocities
  * @param {{ i: number, j: number, normal: Three.Vec3, dist: number, penetration: number }[]} contacts getContacts 的输出, 函数将修改其累计冲量
+ * @returns {{ constrainedForces: Vec3[], constrainedVel: Vec3[] }}
  */
 export function solveClusterConstraints(
-  positions, forces, velocities, contacts, fixedFlags = null, mass = 0.5,
-  iterations = 8, SOFT_TOLERANCE = 1e-7
+  positions, forces, velocities, contacts, fixedFlags = null,
+  mu = 0.3, iterations = 14, SOFT_TOLERANCE = 1e-7
 ) {
-  /** @type {Vec3[]} */
-  const cForces = forces.map(f => [...f]);
   const _fixedFlags = fixedFlags || positions.map(() => false);
   /** @type {Vec3[]} */
+  const cForces = forces.map((f, i) => _fixedFlags[i] ? [0, 0, 0] : [...f]);
+  /** @type {Vec3[]} */
   const cVels = velocities.map((v, i) => _fixedFlags[i] ? [0, 0, 0] : [...v]);
-  if (contacts.length === 0) {
-    return { constrainedForces: cForces, constrainedVel: cVels };
+  if (contacts.length > 0) {
+    solveForceConstraints(cForces, contacts, _fixedFlags, iterations, SOFT_TOLERANCE);
+    solveVelocityConstraints(cVels, contacts, _fixedFlags, mu, iterations, SOFT_TOLERANCE);
   }
-  // PGS 迭代求解力约束
+  return { constrainedForces: cForces, constrainedVel: cVels };
+}
+
+/**
+ * 求解接触约束中的力平衡（支持力）
+ * @param {Vec3[]} cForces - 输入/输出：每个球的合力，函数将修改以满足约束, 需预先清零固定球的力
+ * @param {{ i: number, j: number, normal: Vec3 }[]} contacts
+ * @param {boolean[]} _fixedFlags
+ */
+
+export function solveForceConstraints(cForces, contacts, _fixedFlags, iterations = 8, SOFT_TOLERANCE = 1e-7) {
   for (let iter = 0; iter < iterations; iter++) {
     let maxError = 0;
     for (const { i, j, normal } of contacts) {
-      // 当前法向力分量
-      const fIn = Three.Dot(cForces[i], normal);
-      const fJn = Three.Dot(cForces[j], normal);
-      // 如果 i 被吸向 j (fIn > 0) 且 j 被吸向 i (fJn < 0), 则需要支持力抵消，使法向力平衡
-      const lambda = (fIn - fJn);
-      // 只在需要时施加（fIn > 0 表示 i 被推向 j）
-      if (lambda > 0) {
+      const iFixed = _fixedFlags[i], jFixed = _fixedFlags[j];
+      if (iFixed && jFixed) continue;
+      const f1 = cForces[i], f2 = cForces[j];
+      const fIn = Three.Dot(f1, normal); // i 在 normal 方向的力，>0 表示靠近 j
+      const fJn = Three.Dot(f2, normal); // j 在 normal 方向的力，<0 表示靠近 i
+      if (iFixed) {
+        // 只处理自由球 j：fJn < 0 才靠近
+        if (0 <= fJn) continue;
+        maxError = Math.max(maxError, -fJn);
+        f2[0] -= normal[0] * fJn; f2[1] -= normal[1] * fJn; f2[2] -= normal[2] * fJn;
+      } else if (jFixed) {
+        // 只处理自由球 i：fIn > 0 才靠近
+        if (fIn <= 0) continue;
+        maxError = Math.max(maxError, fIn);
+        f1[0] -= normal[0] * fIn; f1[1] -= normal[1] * fIn; f1[2] -= normal[2] * fIn;
+      } else {
+        // 两球都自由：均分支持力
+        const lambda = (fIn - fJn) * 0.5;
+        if (lambda <= 0) continue;
         maxError = Math.max(maxError, lambda);
-        const cfi = cForces[i], cfj = cForces[j];
-        // 如果其中有且仅有一个是固定球, 则将全部修正量转移给另一侧, 否则均分
-        const iFixed = +_fixedFlags[i] - +_fixedFlags[j];
-        const li = lambda * (1 - iFixed) * 0.5;
-        const lj = lambda * (1 + iFixed) * 0.5;
-        // f'In = -f'Jn（牛顿第三定律）
-        cfi[0] -= normal[0] * li; cfi[1] -= normal[1] * li; cfi[2] -= normal[2] * li;
-        cfj[0] += normal[0] * lj; cfj[1] += normal[1] * lj; cfj[2] += normal[2] * lj;
+        f1[0] -= normal[0] * lambda; f1[1] -= normal[1] * lambda; f1[2] -= normal[2] * lambda;
+        f2[0] += normal[0] * lambda; f2[1] += normal[1] * lambda; f2[2] += normal[2] * lambda;
       }
     }
     if (maxError < SOFT_TOLERANCE) break;
   }
-  // PGS 迭代求解接触面法向速度约束与切向衰减
+}
+
+/**
+ * PGS 同时求解法向无穿透约束与库仑摩擦切向约束
+ *
+ * 使用 accumulated impulse + clamp-and-diff 方法：
+ * - 法向冲量只允许压缩（≥ 0），分离时自动 clamp 回 0
+ * - 切向冲量受库仑锥限制（|Jt| ≤ μ * Jn）
+ * - 两者在同一 PGS 循环内交替收敛，正确处理多接触点
+ *
+ * 所有冲量使用速度量纲（已除以质量），避免来回换算
+ *
+ * @param {Vec3[]} cVels - 输入/输出：每个球的速度，函数将修改以满足约束, 需预先清零固定球的速度
+ * @param {{ i: number, j: number, normal: Vec3, penetration: number }[]} contacts
+ * @param {boolean[]} _fixedFlags
+ * @param {number} mu 摩擦系数
+ */
+export function solveVelocityConstraints(
+  cVels, contacts, _fixedFlags,
+  mu = 0.3, iterations = 20, SOFT_TOLERANCE = 1e-7
+) {
+  const nc = contacts.length;
+  // 累计法向冲量（速度量纲，≥ 0）
+  const accJn = new Float64Array(nc);
+  // 累计切向冲量向量（速度量纲）
+  /** @type {Vec3[]} */
+  const accJt = Array.from({ length: nc }, () => [0, 0, 0]);
   for (let iter = 0; iter < iterations; iter++) {
     let maxError = 0;
-    for (const { i, j, normal } of contacts) {
-      const vIn = Three.Dot(cVels[i], normal);
-      const vJn = Three.Dot(cVels[j], normal);
+    for (let ci = 0; ci < nc; ci++) {
+      const { i, j, normal, penetration } = contacts[ci];
+      // 重量的倒数, 若固定则为 0, 否则相同 (所有球质量相同)
+      const invMassI = _fixedFlags[i] ? 0 : 1, invMassJ = _fixedFlags[j] ? 0 : 1;
+      const invMassSum = invMassI + invMassJ;
+      if (invMassSum < 1) continue;
+      // 法向约束
+      const vIn = Three.Dot(cVels[i], normal), vJn = Three.Dot(cVels[j], normal);
       const relVn = vJn - vIn;  // 相对法向速度（正=分离，负=靠近）
       // 目标：法向相对速度 = 0, 即 vIn = vJn = 平均值
-      if (Math.abs(relVn) > 1e-12) {
-        let deltaI = 0, deltaJ = 0;
-        if (_fixedFlags[i] || _fixedFlags[j]) {
-          // 固定球速度为 0，自由球需完全消除法向分量
-          deltaI = -vIn;
-          deltaJ = -vJn;
-        } else {
-          const avgVn = (vIn + vJn) / 2;
-          deltaI = avgVn - vIn;
-          deltaJ = avgVn - vJn;
-        }
-        maxError = Math.max(maxError, Math.abs(deltaI) + Math.abs(deltaJ));
-        // 只修正法向分量，保留切向
+      // 消除 relVn 所需冲量（可正可负）
+      const dJn_candidate = -relVn / invMassSum;
+      const prevJn = accJn[ci];
+      // clamp：只允许压缩，分离时释放约束
+      const newJn = Math.max(0, prevJn + dJn_candidate);
+      const dJn = newJn - prevJn;
+      accJn[ci] = newJn;
+      if (Math.abs(dJn) > 1e-12) {
+        maxError = Math.max(maxError, Math.abs(dJn));
         const cvi = cVels[i], cvj = cVels[j];
-        cvi[0] += normal[0] * deltaI; cvi[1] += normal[1] * deltaI; cvi[2] += normal[2] * deltaI;
-        cvj[0] += normal[0] * deltaJ; cvj[1] += normal[1] * deltaJ; cvj[2] += normal[2] * deltaJ;
-        // 后续需要在这里计算法向冲量和摩擦导致的动量变化
+        if (invMassI) { cvi[0] -= normal[0] * dJn; cvi[1] -= normal[1] * dJn; cvi[2] -= normal[2] * dJn; }
+        if (invMassJ) { cvj[0] += normal[0] * dJn; cvj[1] += normal[1] * dJn; cvj[2] += normal[2] * dJn; }
+      }
+      // 切向摩擦（库仑锥）
+      if (penetration < 0) continue; // 未真正接触，无摩擦
+      const maxFriction = mu * accJn[ci]; // 跟随当前实际压缩量
+      if (maxFriction < 1e-12) continue;
+      for (const [k, invMassK] of [[i, invMassI], [j, invMassJ]]) {
+        if (invMassK < 1) continue;
+        const v = cVels[k];
+        // 切向速度
+        const vt = Three.add(Three.multiplyScalar([...normal], -Three.Dot(v, normal)), v)
+        const tanSpeed = Three.Length(vt);
+        if (tanSpeed < 1e-12) continue;
+        /** @type {Vec3} */
+        const tHat = Three.multiplyScalar(vt, 1 / tanSpeed); // 切向单位向量
+        // 当前累计切向冲量在 tHat 方向上的投影
+        const prevJtMag = Three.Dot(accJt[ci], tHat);
+        // 候选：完全消除当前切向速度
+        const dJt_candidate = tanSpeed * invMassK;
+        // clamp 到库仑锥 [-maxFriction, +maxFriction]
+        const newJtMag = Math.min(Math.max(prevJtMag + dJt_candidate, -maxFriction), maxFriction);
+        const dJt = newJtMag - prevJtMag;
+        if (Math.abs(dJt) < 1e-12) continue;
+        accJt[ci][0] += tHat[0] * dJt;
+        accJt[ci][1] += tHat[1] * dJt;
+        accJt[ci][2] += tHat[2] * dJt;
+        maxError = Math.max(maxError, Math.abs(dJt));
+        v[0] -= tHat[0] * dJt * invMassK;
+        v[1] -= tHat[1] * dJt * invMassK;
+        v[2] -= tHat[2] * dJt * invMassK;
       }
     }
-    if (maxError < SOFT_TOLERANCE) break; // 收敛检查
+    if (maxError < SOFT_TOLERANCE) break;
   }
-  // 切向摩擦：简单模型，切向速度减半
-  for (const { i, j, normal, penetration } of contacts) {
-    if (penetration < 0) continue; // 未接触，无摩擦
-    const iFixed = _fixedFlags[i], jFixed = _fixedFlags[j];
-    // 分别处理每个球自身的切向速度
-    for (const [k, isFixed] of [[i, iFixed], [j, jFixed]]) {
-      if (isFixed) continue;
-      const v = cVels[k];
-      // 切向速度 = 总速度 - 法向分量
-      const vn = Three.Dot(v, normal);
-      const vTan = [
-        v[0] - normal[0] * vn,
-        v[1] - normal[1] * vn,
-        v[2] - normal[2] * vn,
-      ];
-      const tanSpeed = Math.hypot(...vTan);
-      if (tanSpeed < 1e-12) continue;
-      // 摩擦力方向与切向速度相反 → 切向速度减半
-      v[0] -= vTan[0] * 0.5;
-      v[1] -= vTan[1] * 0.5;
-      v[2] -= vTan[2] * 0.5;
-    }
-  }
-  return { constrainedForces: cForces, constrainedVel: cVels };
+  return cVels;
 }
 
 /**
