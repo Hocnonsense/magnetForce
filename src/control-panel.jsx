@@ -21,7 +21,7 @@ export default function MagnetSimulator() {
   const [selectedId, setSelectedId] = useState(null);
   const [refYId, setRefYId] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
-  const [simSpeed, setSimSpeed] = useState(0.0002);
+  const [simSpeed, setSimSpeed] = useState(0.00004);
   const [rotateMoments, setRotateMoments] = useState(true);
   const [useGravity, setUseGravity] = useState(true);
   const [showVectors, setShowVectors] = useState(true);
