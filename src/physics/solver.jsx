@@ -203,35 +203,32 @@ export function solveVelocityConstraints(
         if (invMassI) { cvi[0] -= normal[0] * dJn; cvi[1] -= normal[1] * dJn; cvi[2] -= normal[2] * dJn; }
         if (invMassJ) { cvj[0] += normal[0] * dJn; cvj[1] += normal[1] * dJn; cvj[2] += normal[2] * dJn; }
       }
-      // 切向摩擦（库仑锥）
-      if (penetration < 0) continue; // 未真正接触，无摩擦
-      const maxFriction = mu * accJn[ci]; // 跟随当前实际压缩量
+      // 切向摩擦（库仑锥，基于相对切向速度，动量守恒）
+      if (penetration < 0) continue;
+      const maxFriction = mu * accJn[ci];
       if (maxFriction < 1e-12) continue;
-      for (const [k, invMassK] of [[i, invMassI], [j, invMassJ]]) {
-        if (invMassK < 1) continue;
-        const v = cVels[k];
-        // 切向速度
-        const vt = Three.add(Three.multiplyScalar([...normal], -Three.Dot(v, normal)), v)
-        const tanSpeed = Three.Length(vt);
-        if (tanSpeed < 1e-12) continue;
-        /** @type {Vec3} */
-        const tHat = Three.multiplyScalar(vt, 1 / tanSpeed); // 切向单位向量
-        // 当前累计切向冲量在 tHat 方向上的投影
-        const prevJtMag = Three.Dot(accJt[ci], tHat);
-        // 候选：完全消除当前切向速度
-        const dJt_candidate = tanSpeed * invMassK;
-        // clamp 到库仑锥 [-maxFriction, +maxFriction]
-        const newJtMag = Math.min(Math.max(prevJtMag + dJt_candidate, -maxFriction), maxFriction);
-        const dJt = newJtMag - prevJtMag;
-        if (Math.abs(dJt) < 1e-12) continue;
-        accJt[ci][0] += tHat[0] * dJt;
-        accJt[ci][1] += tHat[1] * dJt;
-        accJt[ci][2] += tHat[2] * dJt;
-        maxError = Math.max(maxError, Math.abs(dJt));
-        v[0] -= tHat[0] * dJt * invMassK;
-        v[1] -= tHat[1] * dJt * invMassK;
-        v[2] -= tHat[2] * dJt * invMassK;
-      }
+      const vi = cVels[i], vj = cVels[j];
+      const vRel = Three.DistanceTo(vj, vi);
+      const vRelN = Three.Dot(vRel, normal);
+      const vt = Three.add(vRel, Three.multiplyScalar(normal, -vRelN))
+      const tanSpeed = Three.Length(vt);
+      if (tanSpeed < 1e-12) continue;
+      const tHat = Three.multiplyScalar(vt, 1 / tanSpeed); // 切向单位向量
+      // 当前累计切向冲量在 tHat 方向上的投影
+      const prevJtMag = Three.Dot(accJt[ci], tHat);
+      // 候选：完全消除当前切向速度
+      const dJt_candidate = tanSpeed / invMassSum;
+      // clamp 到库仑锥 [-maxFriction, +maxFriction]
+      const newJtMag = Math.min(Math.max(prevJtMag + dJt_candidate, -maxFriction), maxFriction);
+      const dJt = newJtMag - prevJtMag;
+      if (Math.abs(dJt) < 1e-12) continue;
+      accJt[ci][0] += tHat[0] * dJt;
+      accJt[ci][1] += tHat[1] * dJt;
+      accJt[ci][2] += tHat[2] * dJt;
+      maxError = Math.max(maxError, Math.abs(dJt));
+      // 等量反向，动量守恒
+      if (invMassI) { vi[0] -= tHat[0] * dJt * invMassI; vi[1] -= tHat[1] * dJt * invMassI; vi[2] -= tHat[2] * dJt * invMassI; }
+      if (invMassJ) { vj[0] += tHat[0] * dJt * invMassJ; vj[1] += tHat[1] * dJt * invMassJ; vj[2] += tHat[2] * dJt * invMassJ; }
     }
     if (maxError < SOFT_TOLERANCE) break;
   }
