@@ -155,16 +155,30 @@ export default function MagnetSimulator() {
     };
   }, [ready]);
 
-  // Update meshes when magnets change
+  // 创建/销毁 mesh 和 arrow —— 仅当磁球数量或 showVectors 变化时
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
+
+    // 销毁旧对象（释放 GPU 资源）
+    const disposeObj = (o) => {
+      scene.remove(o);
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => m.dispose());
+        else o.material.dispose();
+      }
+      // ArrowHelper 是 Group，递归子对象
+      if (o.children) o.children.forEach(disposeObj);
+    };
     [...meshesRef.current, ...arrowsRef.current, ...forceArrowsRef.current, ...torqueArrowsRef.current]
-      .forEach(o => scene.remove(o));
-    meshesRef.current = [];
-    arrowsRef.current = [];
-    forceArrowsRef.current = [];
-    torqueArrowsRef.current = [];
+      .forEach(disposeObj);
+
+    const dummyDir = new THREE.Vector3(0, 1, 0);
+    const meshes = [];
+    const arrows = [];
+    const forceArrows = [];
+    const torqueArrows = [];
 
     magnets.forEach(mag => {
       // Sphere
@@ -174,65 +188,102 @@ export default function MagnetSimulator() {
         metalness: 0.8,
         roughness: 0.2,
         emissive: mag.color,
-        emissiveIntensity: selectedId === mag.id ? 0.4 : 0.15
+        emissiveIntensity: 0.15
       });
       const mesh = new THREE.Mesh(geo, mat);
-      const scaled = mag.pos.map(p => p * VISUAL_SCALE);
-      mesh.position.set(scaled[0], scaled[1], scaled[2]);
       mesh.userData.id = mag.id;
       scene.add(mesh);
-      meshesRef.current.push(mesh);
-
-      if (!showVectors) return;
-      // Moment arrow - 长度约为直径的1.2倍
-      const arrowLength = VISUAL_RADIUS * 3.6;
-      const arrowHeadLength = VISUAL_RADIUS * 0.5;
-      const arrowHeadWidth = VISUAL_RADIUS * 0.3;
-
-      const dir = new THREE.Vector3(...mag.moment).normalize();
-      const origin = new THREE.Vector3(...scaled);
+      meshes.push(mesh);
+      if (!showVectors) {
+        arrows.push(null);
+        forceArrows.push(null);
+        torqueArrows.push(null);
+        return;
+      }
       const arrow = new THREE.ArrowHelper(
-        dir, origin,
-        arrowLength,
-        0xffdd00,
-        arrowHeadLength,
-        arrowHeadWidth
+        dummyDir, new THREE.Vector3(), VISUAL_RADIUS * 3.6,
+        0xffdd00, VISUAL_RADIUS * 0.5, VISUAL_RADIUS * 0.3
       );
       scene.add(arrow);
-      arrowsRef.current.push(arrow);
+      arrows.push(arrow);
+      const fArrow = new THREE.ArrowHelper(
+        dummyDir, new THREE.Vector3(), VISUAL_RADIUS,
+        0x00ffff, VISUAL_RADIUS * 0.4, VISUAL_RADIUS * 0.24
+      );
+      fArrow.visible = false;
+      scene.add(fArrow);
+      forceArrows.push(fArrow);
+      const tArrow = new THREE.ArrowHelper(
+        dummyDir, new THREE.Vector3(), VISUAL_RADIUS,
+        0xff00ff, VISUAL_RADIUS * 0.32, VISUAL_RADIUS * 0.2
+      );
+      tArrow.visible = false;
+      scene.add(tArrow);
+      torqueArrows.push(tArrow);
+    });
+    meshesRef.current = meshes;
+    arrowsRef.current = arrows;
+    forceArrowsRef.current = forceArrows;
+    torqueArrowsRef.current = torqueArrows;
+  }, [magnets.length, showVectors, ready]);
 
-      const fMag = mag.f ? new THREE.Vector3(...mag.f).length() : 0;
-      if (fMag > 1e-25) {
-        const f = mag.f
-        const fDir = new THREE.Vector3(...f).normalize();
-        // 基于力的大小，范围 0.5R ~ 6R
-        const fLen = VISUAL_RADIUS * Math.min(6, Math.max(0.5, Math.log10(fMag + 1e-10) + 10));
-        const fArrow = new THREE.ArrowHelper(
-          fDir, origin,
-          fLen,
-          0x00ffff,
-          VISUAL_RADIUS * 0.4,
-          VISUAL_RADIUS * 0.24
-        );
-        scene.add(fArrow);
-        forceArrowsRef.current.push(fArrow);
+  // 更新 mesh/arrow 的位置、方向、外观 —— 每当 magnets 或 selectedId 变化
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    const meshes = meshesRef.current;
+    const arrows = arrowsRef.current;
+    const forceArrows = forceArrowsRef.current;
+    const torqueArrows = torqueArrowsRef.current;
+
+    magnets.forEach((mag, idx) => {
+      const scaled = mag.pos.map(p => p * VISUAL_SCALE);
+      const origin = new THREE.Vector3(scaled[0], scaled[1], scaled[2]);
+
+      // Sphere position & highlight
+      const mesh = meshes[idx];
+      if (mesh) {
+        mesh.position.copy(origin);
+        mesh.material.emissiveIntensity = selectedId === mag.id ? 0.4 : 0.15;
       }
-
-      // Torque arrow
-      const tMag = mag.tau ? new THREE.Vector3(...mag.tau).length() : 0;
-      if (tMag > 1e-25) {
-        const t = mag.tau;
-        const tDir = new THREE.Vector3(...t).normalize();
-        const tLen = VISUAL_RADIUS * Math.min(5, Math.max(0.4, Math.log10(tMag + 1e-10) + 8));
-        const tArrow = new THREE.ArrowHelper(
-          tDir, origin,
-          tLen,
-          0xff00ff,
-          VISUAL_RADIUS * 0.32,
-          VISUAL_RADIUS * 0.2
-        );
-        scene.add(tArrow);
-        torqueArrowsRef.current.push(tArrow);
+      if (!showVectors) return;
+      /** @type {THREE.ArrowHelper} Moment arrow */
+      const arrow = arrows[idx];
+      if (arrow) {
+        const dir = new THREE.Vector3(...mag.moment).normalize();
+        arrow.position.copy(origin);
+        arrow.setDirection(dir);
+        arrow.setLength(VISUAL_RADIUS * 3.6, VISUAL_RADIUS * 0.5, VISUAL_RADIUS * 0.3);
+      }
+      /** @type {THREE.ArrowHelper} Force arrow */
+      const fArrow = forceArrows[idx];
+      if (fArrow) {
+        const fMag = mag.f ? new THREE.Vector3(...mag.f).length() : 0;
+        if (fMag > 1e-25) {
+          fArrow.visible = true;
+          const fDir = new THREE.Vector3(...mag.f).normalize();
+          // 基于力的大小，范围 0.5R ~ 6R
+          const fLen = VISUAL_RADIUS * Math.min(6, Math.max(0.5, Math.log10(fMag + 1e-10) + 10));
+          fArrow.position.copy(origin);
+          fArrow.setDirection(fDir);
+          fArrow.setLength(fLen, VISUAL_RADIUS * 0.4, VISUAL_RADIUS * 0.24);
+        } else {
+          fArrow.visible = false;
+        }
+      }
+      /** @type {THREE.ArrowHelper} Torque arrow */
+      const tArrow = torqueArrows[idx];
+      if (tArrow) {
+        const tMag = mag.tau ? new THREE.Vector3(...mag.tau).length() : 0;
+        if (tMag > 1e-25) {
+          tArrow.visible = true;
+          const tDir = new THREE.Vector3(...mag.tau).normalize();
+          const tLen = VISUAL_RADIUS * Math.min(5, Math.max(0.4, Math.log10(tMag + 1e-10) + 8));
+          tArrow.position.copy(origin);
+          tArrow.setDirection(tDir);
+          tArrow.setLength(tLen, VISUAL_RADIUS * 0.32, VISUAL_RADIUS * 0.2);
+        } else {
+          tArrow.visible = false;
+        }
       }
     });
   }, [magnets, selectedId, showVectors, ready]);
