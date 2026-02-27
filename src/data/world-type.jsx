@@ -9,6 +9,7 @@ export const DEFAULT_WORLD_PARAMS = {
   gravity: -9.81,
   damping: 0.3,
   friction: 0.3,
+  rollingFriction: 0.005, // 滚动摩擦系数（相对于法向力的比例）
 };
 
 export class WorldParams {
@@ -21,6 +22,7 @@ export class WorldParams {
     this.gravity = p.gravity;
     this.damping = p.damping;
     this.friction = p.friction;
+    this.rollingFriction = p.rollingFriction;
     this.mMag = p.br / MU_0;
     this.inertia = 0.4 * p.mass * p.radius ** 2;
     this.DIST = p.radius * 2;

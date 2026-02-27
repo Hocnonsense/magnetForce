@@ -3,7 +3,7 @@ import { modifyMagnet } from '../data/magnet-type';
 import { WorldParams } from '../data/world-type';
 import { rotateMoments, safeMove } from './integrator';
 import { calculateMagnet } from './magnet-force';
-import { fixOverlaps, getContacts, solveClusterConstraints } from './solver';
+import { fixOverlaps, getContacts, solveClusterConstraints, rollingFrictionTorques } from './solver';
 
 
 /**
@@ -84,10 +84,11 @@ export class MagnetPGSWorld {
         }
       });
     }
-    // 4. 约束求解（固定球提供支持力）
-    const { constrainedForces, constrainedVel } = solveClusterConstraints(
+    // 4. 约束求解（固定球提供支持力）—— 仅法向约束，无切向摩擦
+    const contacts = getContacts(fixedPos, DIST + this.params.shellThickness);
+    const { constrainedForces, constrainedVel, forceLambda } = solveClusterConstraints(
       fixedPos, coforces, magnets.map(m => m.vel),
-      getContacts(fixedPos, DIST + this.params.shellThickness), fixedFlags, this.params.friction
+      contacts, fixedFlags, this.params.rollingFriction
     );
     // 5. 自适应时间步（固定球跳过积分）
     const { newPos, newVel, safedt, reason } = safeMove(
@@ -101,9 +102,21 @@ export class MagnetPGSWorld {
     getContacts(fixedNewPos, DIST + this.params.shellThickness).map(c => {
       if (c.dist < this.params.radius) throw new Error(`球${c.i}-球${c.j}重叠过深: dist=${(c.dist * 1000).toFixed(4)}mm`)
     });
-    // 7. 更新旋转
+    // 7. 滚动摩擦力矩（很小，阻碍球在接触面上滚动）
+    // const rollTorques = rollingFrictionTorques(
+    //   contacts, constrainedVel, forceLambda,
+    //   this.params.radius, this.params.rollingFriction || 0.005, fixedFlags
+    // );
+    // // 叠加滚动摩擦到磁力矩
+    // const totalTorques = torques.map((t, i) => [
+    //   t[0] + rollTorques[i][0],
+    //   t[1] + rollTorques[i][1],
+    //   t[2] + rollTorques[i][2],
+    // ]);
+    // 8. 更新旋转
     const newMoments = rotateMoments(
-      torques, magnets.map(m => ({ moment: m.moment, omega: m.omega })), safedt,
+      torques,  // totalTorques
+      magnets.map(m => ({ moment: m.moment, omega: m.omega })), safedt,
       this.params.inertia, 0.3
     );
     return {

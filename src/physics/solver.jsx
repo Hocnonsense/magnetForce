@@ -86,13 +86,25 @@ export function fixOverlaps(
 }
 
 /**
- * 求解接触约束：只约束法向分量，保留切向自由度, 同时应用切向摩擦力
+ * 求解接触约束：只约束法向分量，保留切向自由度
+ *
+ * 球-球接触的物理模型：
+ * - 法向：不穿透约束（bilateral，精确消除法向相对运动）
+ * - 切向：不施加滑动摩擦。球体之间的切向力驱动滚动，而非滑动。
+ *   滚动摩擦由 rollingFrictionTorques() 单独计算为力矩。
+ *
+ * 当前的模型中, 球的滚动 (磁轴旋转) 与球中心的移动是解耦的, 但这个影响目前来说是不大的:
+ * 1. 镀镍磁球表面光滑，而且大部分运动很快就变成滚动
+ * 2. 磁力矩远大于摩擦力矩，磁矩方向主要由磁力矩决定，摩擦对旋转的贡献是次要修正
+ * 3. 决定磁铁组合结构的大部分运动由磁力切向分量驱动的，只要切向力不被锁死就行
+ *
  * @param {Vec3[]} positions
  * @param {Vec3[]} forces
  * @param {Vec3[]} velocities
- * @param {number} [mu=0.3] 计算的摩擦阻力
- * @param {{ i: number, j: number, normal: Three.Vec3, dist: number }[]} contacts getContacts 的输出, 函数将修改其累计冲量
- * @returns {{ constrainedForces: Vec3[], constrainedVel: Vec3[], forceLambda: Float64Array }} forceLambda: 每个 contact 的法向约束力（力量纲）
+ * @param {{ i: number, j: number, normal: Three.Vec3, dist: number }[]} contacts getContacts 的输出
+ * @param {boolean[]|null} fixedFlags
+ * @param {number} [mu=0.3] 未使用，保留接口兼容
+ * @returns {{ constrainedForces: Vec3[], constrainedVel: Vec3[], forceLambda: Float64Array }}
  */
 export function solveClusterConstraints(
   positions, forces, velocities, contacts, fixedFlags = null,
@@ -108,10 +120,99 @@ export function solveClusterConstraints(
   if (activeIdx.length > 0) {
     const activeContacts = activeIdx.map(ci => contacts[ci]);
     solveVelocityConstraints(cVels, activeContacts, _fixedFlags, SOFT_TOLERANCE);
+    // 只做法向约束（速度和力），不施加切向摩擦, 则调用 solveNormalForceConstraints
     const _forceLambda = solveForceConstraints(cForces, cVels, activeContacts, _fixedFlags, mu, 5, SOFT_TOLERANCE);
     activeIdx.forEach((ci, idx) => { forceLambda[ci] = _forceLambda[idx]; });
   }
   return { constrainedForces: cForces, constrainedVel: cVels, forceLambda };
+}
+
+/**
+ * 纯法向力约束（无摩擦）
+ *
+ * 对每个接触，消除法向方向的相对加速度分量（即法向力差），
+ * 确保接触球对不会在法向方向加速穿透。
+ * 切向力完全保留，让球自由滚动。
+ *
+ * @param {Vec3[]} cForces - 输入/输出：每个球的合力
+ * @param {{ i: number, j: number, normal: Vec3 }[]} contacts
+ * @param {boolean[]} _fixedFlags
+ * @returns {Float64Array} 每个 contact 的法向约束力 lambda
+ */
+function solveNormalForceConstraints(cForces, contacts, _fixedFlags, SOFT_TOLERANCE = 1e-7) {
+  const nc = contacts.length;
+  const _lambda = new Float64Array(nc);
+  if (nc === 0) return _lambda;
+  const activeIdx = getActiveContacts(contacts, _fixedFlags);
+  if (activeIdx.length === 0) return _lambda;
+  const { A, b } = buildConstraintSystem(contacts, activeIdx, _fixedFlags, cForces);
+  const lambda = solveLinearSystem(A, b);
+  if (!lambda) return _lambda;
+  applyLambda(cForces, contacts, activeIdx, _fixedFlags, lambda, _lambda, SOFT_TOLERANCE);
+  return _lambda;
+}
+
+/**
+ * 计算滚动摩擦力矩
+ *
+ * 对每个接触对，如果有相对切向运动（角速度或力驱动），
+ * 施加一个阻碍滚动的力矩 τ_roll = μ_r × |F_n| × R × (-ω̂_roll)
+ *
+ * @param {{ i: number, j: number, normal: Vec3, dist: number }[]} contacts
+ * @param {Vec3[]} velocities - 球的线速度
+ * @param {Float64Array} forceLambda - 法向约束力
+ * @param {number} radius - 球半径
+ * @param {number} muRoll - 滚动摩擦系数（典型值 0.001-0.01）
+ * @param {boolean[]|null} fixedFlags
+ * @returns {Vec3[]} 每个球的滚动摩擦力矩
+ */
+export function rollingFrictionTorques(contacts, velocities, forceLambda, radius, muRoll, fixedFlags = null) {
+  const n = velocities.length;
+  const _fixedFlags = fixedFlags || new Array(n).fill(false);
+  /** @type {Vec3[]} */
+  const rollTorques = velocities.map(() => [0, 0, 0]);
+  for (let ci = 0; ci < contacts.length; ci++) {
+    const { i, j, normal } = contacts[ci];
+    const fn = Math.abs(forceLambda[ci]);
+    if (fn < 1e-15) continue;
+    /** @type {Vec3} 相对切向速度（球j相对于球i的切向速度） */
+    const vRel = [
+      velocities[j][0] - velocities[i][0],
+      velocities[j][1] - velocities[i][1],
+      velocities[j][2] - velocities[i][2],
+    ];
+    const vRelN = Three.Dot(vRel, normal);
+    /** @type {Vec3} 切向相对速度 */
+    const vt = [
+      vRel[0] - normal[0] * vRelN,
+      vRel[1] - normal[1] * vRelN,
+      vRel[2] - normal[2] * vRelN,
+    ];
+    const vtLen = Three.Length(vt);
+    if (vtLen < 1e-15) continue;
+    // 滚动摩擦力矩大小
+    const tauMag = muRoll * fn * radius;
+    // 滚动方向：切向速度对应的滚动轴 = normal × v_tangent_hat
+    // 对球i：滚动方向使其表面速度与vt同向 → 力矩阻碍这个滚动
+    /** @type {Vec3} */
+    const vtHat = Three.multiplyScalar(vt, 1 / vtLen);
+    // 滚动轴 = normal × vtHat（右手定则）
+    const rollAxis = Three.Cross(normal, vtHat);
+
+    if (!_fixedFlags[i]) {
+      // 球i的滚动力矩：阻碍其朝vt方向的表面运动
+      rollTorques[i][0] -= rollAxis[0] * tauMag;
+      rollTorques[i][1] -= rollAxis[1] * tauMag;
+      rollTorques[i][2] -= rollAxis[2] * tauMag;
+    }
+    if (!_fixedFlags[j]) {
+      // 球j的滚动力矩：阻碍其远离vt方向的表面运动
+      rollTorques[j][0] += rollAxis[0] * tauMag;
+      rollTorques[j][1] += rollAxis[1] * tauMag;
+      rollTorques[j][2] += rollAxis[2] * tauMag;
+    }
+  }
+  return rollTorques;
 }
 
 /**
@@ -203,7 +304,7 @@ export function solveForceConstraints(
       // 全部满足库仑锥 → 施加结果到 cForces
       for (let ci = 0; ci < nc; ci++) {
         _lambda[ci] = lambdaPerContact[ci].fn;
-        const F = _applyForcesToCForces(bases[ci], lambdaPerContact[ci], isStatic[ci], dynamicFrictionForce[ci]);
+        const F = applyForcesToCForces(bases[ci], lambdaPerContact[ci], isStatic[ci], dynamicFrictionForce[ci]);
         updataByFixedFlags(cForces, contacts[ci], F, _fixedFlags);
       }
       return _lambda;
@@ -231,7 +332,7 @@ export function solveForceConstraints(
     const lambdaPerContact = mapLambdaToContacts(lambda, eqMap, isStatic)
     for (let ci = 0; ci < nc; ci++) {
       _lambda[ci] = lambdaPerContact[ci].fn;
-      const F = _applyForcesToCForces(bases[ci], lambdaPerContact[ci], isStatic[ci], dynamicFrictionForce[ci]);
+      const F = applyForcesToCForces(bases[ci], lambdaPerContact[ci], isStatic[ci], dynamicFrictionForce[ci]);
       updataByFixedFlags(cForces, contacts[ci], F, _fixedFlags);
     }
   }
@@ -261,12 +362,12 @@ function updataByFixedFlags(forces, contact, contactForces, _fixedFlags) {
  * @returns {{ fn: number, ft1: number, ft2: number }[]}
  */
 function mapLambdaToContacts(lambda, eqMap, isStatic) {
-  return eqMap.map((baseIdx, a) => {
+  return Array.from(eqMap, (baseIdx, a) => {
     const fn = lambda[baseIdx];
     const ft1 = isStatic[a] ? lambda[baseIdx + 1] : 0;
     const ft2 = isStatic[a] ? lambda[baseIdx + 2] : 0;
     return { fn, ft1, ft2 };
-  })
+  });
 }
 
 /**
@@ -294,28 +395,12 @@ function checkCoulombCone(lambdaPerContact, isStatic, mu, tolerance) {
 /**
  * 将约束力（含动摩擦力）施加到最终力场 cForces
  * 修复原逻辑：动摩擦接触需叠加 dynamicFrictionForce
- */
-function applyForcesToCForces(
-  cForces, _lambda, contacts, _fixedFlags, bases,
-  lambdaPerContact, isStatic, dynamicFrictionForce
-) {
-  const nc = contacts.length;
-  for (let ci = 0; ci < nc; ci++) {
-    _lambda[ci] = lambdaPerContact[ci].fn;
-    const F = _applyForcesToCForces(bases[ci], lambdaPerContact[ci], isStatic[ci], dynamicFrictionForce[ci]);
-    updataByFixedFlags(cForces, contacts[ci], F, _fixedFlags);
-  }
-}
-
-/**
- * 将约束力（含动摩擦力）施加到最终力场 cForces
- * 修复原逻辑：动摩擦接触需叠加 dynamicFrictionForce
  * @param {Three.Vec3[]} base = bases[ci]
  * @param {{fn : number, ft1: number, ft2: number}} lambda = lambdaPerContact[ci]
  * @param {Vec3} Ff = dynamicFrictionForce[ci]
  * @param {boolean} isStatic
  */
-function _applyForcesToCForces(base, lambda, isStatic, Ff) {
+function applyForcesToCForces(base, lambda, isStatic, Ff) {
   const { fn, ft1, ft2 } = lambda;
   const [n, t1, t2] = base;
   // 基础约束力（法向 + 静摩擦切向）
