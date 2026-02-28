@@ -7,12 +7,11 @@ import initMagnetWorld from './physics/world';
 import { assertVec3 } from './utils/three';
 import { useUndoHistory } from './hooks/useUndoHistory';
 import { usePhysicsLoop } from './hooks/usePhysicsLoop';
+import { useGrouping, getNewGroupName } from './hooks/useGrouping';
 import { SimSection, SelectedMagnetPanel } from './components/MagnetPanelComponents';
 import { PresetPanel } from './components/PresetPanel';
 import { GroupPanel } from './components/GroupPanel';
-import {
-  smallBtnStyle, presetBtnStyle, secStyle, lbl, chipBtn
-} from './styles';
+import { smallBtnStyle, secStyle, lbl } from './styles';
 
 // Simulation constants
 const VISUAL_SCALE = 100;
@@ -64,12 +63,6 @@ export default function MagnetSimulator() {
   const [presets, setPresets] = useState([]);
   const [ready, setReady] = useState(false);
 
-  // ── 分组：纯 id 集合，无颜色 ─────────────────────────────────────────────
-  // { [name]: Set<id> }
-  const [groups, setGroups] = useState({});
-  const [activeGroup, setActiveGroup] = useState(null);
-  const [newGroupName, setNewGroupName] = useState('');
-
   // ── 自定义预设（从分组保存）─────────────────────────────────────────────
   // { [name]: { magnets: Array<{pos,vel,moment,color,...}> } }
   // 球坐标以质心为原点存储（相对坐标）
@@ -88,10 +81,15 @@ export default function MagnetSimulator() {
   const needsSyncRef = useRef(true);
   const selectedIdsRef = useRef(new Set());
   selectedIdsRef.current = selectedIds;
+  const keyTrapRef = useRef(null);
 
   // 最新参数 ref，避免闭包捕获旧值
   const stateRef = useRef({ magnets, isSimulating, simSpeed, rotateMoments, useGravity });
   stateRef.current = { magnets, isSimulating, simSpeed, rotateMoments, useGravity };
+
+  // ── 分组 ──────────────────────────────────────────────────────────────────
+  const grouping = useGrouping({ selectedIds, setSelectedIds, keyTrapRef, stateRef });
+  const { activeGroup, groups, setGroups, setActiveGroup, getIdsInAffectedGroup, cleanupIds, resetGroups } = grouping;
 
   /** @type {React.RefObject<import('./physics/world').MagnetPGSWorld|null>} */
   const magnetWorldRef = useRef(null);
@@ -115,15 +113,6 @@ export default function MagnetSimulator() {
 
   // 兼容：单选时提供 selectedId
   const selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
-
-  // 仅处理组内对象
-  const getIdsInAffectedGroup = useCallback(() => {
-    const ids = new Set();
-    if (activeGroup && groups[activeGroup]) {
-      for (const id of groups[activeGroup]) ids.add(id);
-    }
-    return ids;
-  }, [activeGroup, groups]);
 
   // ── 撤销历史 ──────────────────────────────────────────────────────────────
   const { push: pushUndo, reset: resetUndo, histIdxRef } = useUndoHistory({
@@ -446,8 +435,6 @@ export default function MagnetSimulator() {
   }, [selectedId]);
 
   // ── 键盘输入捕获 ──────────────────────────────────────────────────────────
-  // 用隐藏 textarea 捕获按键，避免浏览器滚动条拦截方向键/PageUp/Down 等
-  const keyTrapRef = useRef(null);
   // 点击 3D 区域时不再自动聚焦 keyTrap，仅选择分组时聚焦
   const handleKeyDown = useCallback((e) => {
     // 模拟时不允许操作
@@ -562,15 +549,7 @@ export default function MagnetSimulator() {
     if (effIds.size === 0) return;
     needsSyncRef.current = true;
     setMagnets(prev => prev.filter(m => !effIds.has(m.id)));
-    // 从分组中清理
-    setGroups(prev => {
-      const next = {};
-      for (const [name, ids] of Object.entries(prev)) {
-        const kept = new Set([...ids].filter(id => !effIds.has(id)));
-        if (kept.size > 0) next[name] = kept;
-      }
-      return next;
-    });
+    cleanupIds(effIds);
     setSelectedIds(new Set());
     setTotalSimTime(0);
   };
@@ -582,8 +561,7 @@ export default function MagnetSimulator() {
     resetMagnetIdCounter(); // 确保预设加载的磁球 ID 从 0 开始连续
     loadPreset(name, MAGNET_RADIUS).then(res => setMagnets(res.magnets));
     setSelectedIds(new Set());
-    setGroups({});
-    setActiveGroup(null);
+    resetGroups();
     setIsSimulating(false);
     setTotalSimTime(0);
   };
@@ -630,100 +608,6 @@ export default function MagnetSimulator() {
     if (!isSimulating) needsSyncRef.current = true;
     setIsSimulating(v => !v);
   };
-
-  // ── 分组操作 ──────────────────────────────────────────────────────────────
-  /**
-   * 如果不提供默认名称, 则使用 "#1", "#2" 等格式生成唯一名称
-   * 若默认名称存在, 则在其基础上生成 "{NAME}-1", "{NAME}-2" 等格式的唯一名称
-   */
-  const getNewGroupName = (groups, base = "") => {
-    let name = base.trim();
-    let prefix = `${base.trim()}-`;
-    let idx = 1;
-    if (base === "") {
-      prefix = "#";
-      name = `#${idx}`
-    }
-    for (; ; idx++) {
-      if (!groups[name]) break;
-      name = `${prefix}${idx}`;
-    }
-    return name;
-  }
-  const createGroup = useCallback(() => {
-    if (selectedIds.size === 0) return;
-    const name = getNewGroupName(groups, newGroupName.trim() || "");
-    setGroups(prev => ({ ...prev, [name]: new Set(selectedIds) }));
-    setNewGroupName(name);
-    setActiveGroup(name);
-    setTimeout(() => { if (keyTrapRef.current) keyTrapRef.current.focus(); }, 0);
-  }, [selectedIds, groups, newGroupName]);
-  const deleteGroup = (gName) => {
-    setGroups(prev => { const next = { ...prev }; delete next[gName]; return next; });
-    if (activeGroup === gName) setActiveGroup(null);
-  };
-  const selectGroup = (gName) => {
-    if (activeGroup === gName) { setActiveGroup(null); setNewGroupName(''); return; }
-    setSelectedIds(new Set(groups[gName] || []));
-    setActiveGroup(gName);
-    setNewGroupName('');
-    // 聚焦键盘捕获区，使方向键/PageUp/Down 等可用
-    setTimeout(() => { if (keyTrapRef.current) keyTrapRef.current.focus(); }, 0);
-  };
-  const confirmRename = () => {
-    if (!activeGroup || !newGroupName.trim()) { return; }
-    const newName = newGroupName.trim();
-    if (newName === activeGroup) {
-      setNewGroupName('');
-      return;
-    }
-    if (groups[newName]) { return; } // 名称冲突
-    setGroups(prev => {
-      const next = {};
-      for (const [k, v] of Object.entries(prev)) {
-        next[k === activeGroup ? newName : k] = v;
-      }
-      return next;
-    });
-    setActiveGroup(newName);
-    setNewGroupName('');
-  };
-
-  // ── Ctrl+G / Ctrl+Shift+G 全局快捷键 ────────────────────────────────────
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.target.tagName === 'INPUT' && e.target !== keyTrapRef.current) return;
-      if ((e.key === 'g' || e.key === 'G') && (e.ctrlKey || e.metaKey)) {
-        // 使用捕获阶段（capture: true）+ stopImmediatePropagation 以覆盖 Edge/Chrome 的 Ctrl+G 查找行为
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        if (e.shiftKey) {
-          activeGroup && deleteGroup(activeGroup)
-        } else {
-          createGroup();
-        }
-      } else if ((e.key === 'a' || e.key === 'A') && (e.ctrlKey || e.metaKey)) {
-        // Ctrl+A 全选全体对象 (无 activeGroup)，或组内对象 (有 activeGroup)
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        setSelectedIds(prev => {
-          // 1. 确定操作范围：组内 or 全局
-          const scopeIds = activeGroup
-            ? [...(groups[activeGroup] || [])]
-            : stateRef.current.magnets.map(m => m.id);
-          // 2. 核心逻辑：无 Shift = 全选范围；有 Shift = 范围内“未选中”部分（即反选范围内容）
-          const nextIds = e.shiftKey
-            ? scopeIds.filter(id => !prev.has(id)) // 保留范围中当前未选中的
-            : scopeIds;                           // 全选范围（会清除范围外选中）
-          return new Set(nextIds);
-        });
-      }
-    };
-    window.addEventListener('keydown', handler, true); // capture phase
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [createGroup, deleteGroup, activeGroup]);
 
   // ── 保存分组为预设 & 拖放添加 ──────────────────────────────────────────
   /** 将激活分组保存为自定义预设（球坐标相对质心） */
@@ -869,16 +753,9 @@ export default function MagnetSimulator() {
 
         {/* Selected & Grouping Magnet Controls */}
         <GroupPanel
-          groups={groups}
-          activeGroup={activeGroup}
-          newGroupName={newGroupName}
+          grouping={grouping}
           selectedIds={selectedIds}
-          onCreateGroup={createGroup}
-          onSelectGroup={selectGroup}
-          onDeleteGroup={deleteGroup}
-          onConfirmRename={confirmRename}
-          onSetNewGroupName={setNewGroupName}
-          onDeselect={() => { setActiveGroup(null); setNewGroupName(''); }}
+          onDeselect={() => { grouping.setActiveGroup(null); grouping.setNewGroupName(''); }}
           onRemoveMagnet={removeMagnet}
         />
 

@@ -2,34 +2,26 @@ import React from 'react';
 import { secStyle, lbl, chipBtn } from '../styles';
 
 /**
+ * @typedef {import('../hooks/useGrouping').GroupingState} GroupingState
+ */
+
+/**
  * 分组管理 + 选择信息面板
  *
  * @param {Object} props
- * @param {Object<string, Set<number>>} props.groups
- * @param {string|null} props.activeGroup
- * @param {string} props.newGroupName
+ * @param {GroupingState} props.grouping
  * @param {Set<number>} props.selectedIds
- * @param {() => void} props.onCreateGroup
- * @param {(name: string) => void} props.onSelectGroup
- * @param {(name: string) => void} props.onDeleteGroup
- * @param {() => void} props.onConfirmRename
- * @param {(name: string) => void} props.onSetNewGroupName
  * @param {() => void} props.onDeselect       - 取消选择（清空 activeGroup + newGroupName）
  * @param {() => void} props.onRemoveMagnet
  */
 export function GroupPanel({
-  groups,
-  activeGroup,
-  newGroupName,
+  grouping,
   selectedIds,
-  onCreateGroup,
-  onSelectGroup,
-  onDeleteGroup,
-  onConfirmRename,
-  onSetNewGroupName,
   onDeselect,
   onRemoveMagnet,
 }) {
+  const { groups, activeGroup, newGroupName, setNewGroupName,
+    createGroup, selectGroup, deleteGroup, confirmRename } = grouping;
   const hasRename = newGroupName.trim() && newGroupName.trim() !== activeGroup;
 
   return (
@@ -39,7 +31,7 @@ export function GroupPanel({
         <span>分组</span>
         {selectedIds.size > 0 && (
           <span
-            onClick={onCreateGroup}
+            onClick={createGroup}
             style={{ fontSize: '10px', color: '#6bd5ff', cursor: 'pointer', marginLeft: 'auto' }}
           >
             创建分组 (Ctrl+G)
@@ -47,7 +39,7 @@ export function GroupPanel({
         )}
         {activeGroup && (
           <span
-            onClick={() => hasRename ? onConfirmRename() : onDeselect()}
+            onClick={() => hasRename ? confirmRename() : onDeselect()}
             style={{ fontSize: '10px', color: hasRename ? '#8ab4f8' : '#aaa', cursor: 'pointer', marginLeft: 'auto' }}
           >
             {hasRename ? '重命名' : '取消选择'}
@@ -55,7 +47,7 @@ export function GroupPanel({
         )}
         {activeGroup && (
           <span
-            onClick={() => onDeleteGroup(activeGroup)}
+            onClick={() => deleteGroup(activeGroup)}
             style={{ fontSize: '10px', color: '#ff6b6b', cursor: 'pointer', marginLeft: 'auto' }}
           >
             取消分组 (Ctrl+Shift+G)
@@ -72,10 +64,10 @@ export function GroupPanel({
               autoFocus
               value={newGroupName}
               placeholder={name}
-              onChange={e => onSetNewGroupName(e.target.value)}
+              onChange={e => setNewGroupName(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter') {
-                  if (newGroupName.trim() && newGroupName.trim() !== name) onConfirmRename();
+                  if (newGroupName.trim() && newGroupName.trim() !== name) confirmRename();
                   else onDeselect();
                 }
                 if (e.key === 'Escape') onDeselect();
@@ -85,7 +77,7 @@ export function GroupPanel({
           ) : (
             <span
               key={name}
-              onClick={() => onSelectGroup(name)}
+              onClick={() => selectGroup(name)}
               style={{
                 padding: '2px 8px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
                 background: 'rgba(255,255,255,0.06)',
@@ -94,7 +86,7 @@ export function GroupPanel({
               }}
             >
               {name} <span style={{ opacity: 0.5 }}>({ids.size})</span>
-              <button onClick={(e) => { e.stopPropagation(); onDeleteGroup(name); }} style={{ ...chipBtn, color: '#ff6b6b' }} title="删除组">✕</button>
+              <button onClick={(e) => { e.stopPropagation(); deleteGroup(name); }} style={{ ...chipBtn, color: '#ff6b6b' }} title="删除组">✕</button>
             </span>
           )
         ))}
