@@ -15,6 +15,34 @@ const VISUAL_SCALE = 100;
 /** 白圈屏幕像素宽度（固定） */
 const RING_PX = 3;
 
+/**
+ * 根据当前相机距离算白圈在物理坐标下的宽度
+ * @param {THREE.Vector3} refPoint 参考点（默认原点）
+ * @param {THREE.PerspectiveCamera} camera
+ * @param {THREE.WebGLRenderer} renderer
+ */
+function getRingWorldWidth(refPoint, camera, renderer) {
+  if (!camera || !renderer) return 0;
+  const target = refPoint ?? new THREE.Vector3(0, 0, 0);
+  const dist = camera.position.distanceTo(target);
+  const fov = camera.fov * Math.PI / 180;
+  const screenH = renderer.domElement.height;
+  const pixelPerUnit = screenH / (2 * dist * Math.tan(fov / 2));
+  // 视觉坐标宽度 → 物理坐标宽度
+  return pixelPerUnit
+};
+
+function getMagnetsCenter(magnets) {
+  const c = new THREE.Vector3(0, 0, 0);
+  const cnt = magnets.length;
+  if (cnt === 0) return c;
+  magnets.forEach(m => {
+    c.add(new THREE.Vector3(m.pos[0], m.pos[1], m.pos[2]));
+  });
+  c.divideScalar(cnt);
+  return c;
+}
+
 export default function MagnetSimulator() {
   const MAGNET_RADIUS = 0.0025; // 5mm diameter
   const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
@@ -115,18 +143,6 @@ export default function MagnetSimulator() {
    * @param {THREE.Vector3} [refPoint] 参考点（默认原点）
    * @returns {number} 物理坐标步长
    */
-  const getRingWorldWidth = useCallback((refPoint) => {
-    const camera = cameraRef.current;
-    const renderer = rendererRef.current;
-    if (!camera || !renderer) return MAGNET_RADIUS;
-    const target = refPoint ?? new THREE.Vector3(0, 0, 0);
-    const dist = camera.position.distanceTo(target);
-    const fov = camera.fov * Math.PI / 180;
-    const screenH = renderer.domElement.height;
-    const pixelPerUnit = screenH / (2 * dist * Math.tan(fov / 2));
-    // 视觉坐标宽度 → 物理坐标宽度
-    return RING_PX / pixelPerUnit / VISUAL_SCALE;
-  }, [MAGNET_RADIUS]);
 
   /** 检查 movedIds 平移 delta 后是否与其他球碰撞 */
   const canMove = useCallback((mags, movedIds, delta) => {
@@ -417,91 +433,69 @@ export default function MagnetSimulator() {
   // ── 键盘输入捕获 ──────────────────────────────────────────────────────────
   // 用隐藏 textarea 捕获按键，避免浏览器滚动条拦截方向键/PageUp/Down 等
   const keyTrapRef = useRef(null);
-
   // 点击 3D 区域时不再自动聚焦 keyTrap，仅选择分组时聚焦
-
   const handleKeyDown = useCallback((e) => {
     // 模拟中不允许移动/旋转
     if (stateRef.current.isSimulating) return;
-    const effIds = getEffectiveIds();
-    if (effIds.size === 0) return;
-    const camera = cameraRef.current;
-    if (!camera) return;
-
+    const effIds = getEffectiveIds(); if (effIds.size === 0) return;
+    /** @type {THREE.PerspectiveCamera} */
+    const camera = cameraRef.current; if (!camera) return;
     // 相机空间方向
-    const forward = new THREE.Vector3();
-    const right = new THREE.Vector3();
-    const up = new THREE.Vector3();
-    camera.getWorldDirection(forward);
-    right.crossVectors(forward, camera.up).normalize();
-    up.crossVectors(right, forward).normalize();
-
-    // 选中球的质心（物理坐标）
-    const currentMags = stateRef.current.magnets;
-    let cx = 0, cy = 0, cz = 0, cnt = 0;
-    for (const m of currentMags) {
-      if (effIds.has(m.id)) { cx += m.pos[0]; cy += m.pos[1]; cz += m.pos[2]; cnt++; }
-    }
-    const center = new THREE.Vector3(cx / cnt * VISUAL_SCALE, cy / cnt * VISUAL_SCALE, cz / cnt * VISUAL_SCALE);
-
-    // 白圈世界宽度（物理坐标）
-    const ringW = getRingWorldWidth(center);
-
-    // ── 方向键：平移 ──
-    let delta = null;
+    const forward = new THREE.Vector3(); camera.getWorldDirection(forward);
+    const right = new THREE.Vector3(); right.crossVectors(forward, camera.up).normalize();
+    const up = new THREE.Vector3(); up.crossVectors(right, forward).normalize();
+    // console.log(
+    //   `forward: ${forward.x.toFixed(2)}, ${forward.y.toFixed(2)}, ${forward.z.toFixed(2)}; ` +
+    //   `right: ${right.x.toFixed(2)}, ${right.y.toFixed(2)}, ${right.z.toFixed(2)}; ` +
+    //   `up: ${up.x.toFixed(2)}, ${up.y.toFixed(2)}, ${up.z.toFixed(2)}`
+    // )
+    /** 选中球的质心（物理坐标） */
+    const center = getMagnetsCenter(
+      stateRef.current.magnets.filter(m => effIds.has(m.id))
+    );
+    /** 白圈世界宽度（物理坐标） */
+    const ringW = RING_PX / VISUAL_SCALE / getRingWorldWidth(center, camera, rendererRef.current);
+    let delta = null, rotAxis = null;
     switch (e.key) {
+      // ── 方向键：平移 ──
       case 'ArrowRight': delta = [right.x * ringW, right.y * ringW, right.z * ringW]; break;
       case 'ArrowLeft': delta = [-right.x * ringW, -right.y * ringW, -right.z * ringW]; break;
-      case 'ArrowUp':
-        if (e.shiftKey) delta = [forward.x * ringW, forward.y * ringW, forward.z * ringW];
-        else delta = [up.x * ringW, up.y * ringW, up.z * ringW];
-        break;
-      case 'ArrowDown':
-        if (e.shiftKey) delta = [-forward.x * ringW, -forward.y * ringW, -forward.z * ringW];
-        else delta = [-up.x * ringW, -up.y * ringW, -up.z * ringW];
-        break;
+      case 'ArrowUp': delta = [up.x * ringW, up.y * ringW, up.z * ringW]; break;
+      case 'ArrowDown': delta = [-up.x * ringW, -up.y * ringW, -up.z * ringW]; break;
+      case 'PageUp': rotAxis = right.clone().negate(); break;
+      case 'PageDown': rotAxis = right.clone(); break;
+      case 'Home': rotAxis = up.clone().negate(); break;
+      case 'End': rotAxis = up.clone(); break;
     }
     if (delta) {
       e.preventDefault();
-      setMagnets(prev => {
-        if (!canMove(prev, effIds, delta)) return prev;
+      setMagnets(m => {
+        if (!canMove(m, effIds, delta)) return m;
         needsSyncRef.current = true;
-        return prev.map(m => effIds.has(m.id)
+        return m.map(m => effIds.has(m.id)
           ? { ...m, pos: m.pos.map((p, i) => p + delta[i]) }
           : m
         );
       });
       return;
-    }
-
-    // ── PageUp/Home = 逆时针，PageDown/End = 顺时针 ──
-    // 绕相机上方向轴旋转（以质心为中心）
-    // 旋转步长 = arctan(ringW / MAGNET_RADIUS)
-    // 缩小→ringW大→步长大；放大→ringW小→步长小
-    let rotSign = 0;
-    if (e.key === 'PageUp' || e.key === 'Home') rotSign = 1;
-    else if (e.key === 'PageDown' || e.key === 'End') rotSign = -1;
-    if (rotSign === 0) return;
-
-    e.preventDefault();
-    const angle = rotSign * Math.atan2(ringW, MAGNET_RADIUS);
-    const axis = up.clone().normalize();
-    const centerPhys = new THREE.Vector3(cx / cnt, cy / cnt, cz / cnt);
-    const q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
-
-    setMagnets(prev => {
-      if (!canRotate(prev, effIds, centerPhys, axis, angle)) return prev;
-      needsSyncRef.current = true;
-      return prev.map(m => {
-        if (!effIds.has(m.id)) return m;
-        const v = new THREE.Vector3(...m.pos).sub(centerPhys);
-        v.applyQuaternion(q).add(centerPhys);
-        // 同步旋转磁矩
-        const mom = new THREE.Vector3(...m.moment).applyQuaternion(q);
-        return { ...m, pos: [v.x, v.y, v.z], moment: [mom.x, mom.y, mom.z] };
+    } else if (rotAxis) {
+      // 旋转操作处理逻辑
+      e.preventDefault();
+      const angle = Math.atan2(ringW, MAGNET_RADIUS);
+      const axis = rotAxis;
+      const q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+      setMagnets(m => {
+        if (!canRotate(m, effIds, center, axis, angle)) return m;
+        needsSyncRef.current = true;
+        return m.map(m => {
+          if (!effIds.has(m.id)) return m;
+          const v = new THREE.Vector3(...m.pos).sub(center).applyQuaternion(q).add(center);
+          const mom = new THREE.Vector3(...m.moment).applyQuaternion(q);
+          return { ...m, pos: [v.x, v.y, v.z], moment: [mom.x, mom.y, mom.z] };
+        });
       });
-    });
-  }, [getEffectiveIds, canMove, canRotate, getRingWorldWidth, MAGNET_RADIUS]);
+    }
+  }, [getEffectiveIds, canMove, canRotate, MAGNET_RADIUS]);
 
   // ── 点击选择 ──────────────────────────────────────────────────────────────
   const handleClick = (e) => {
@@ -544,7 +538,6 @@ export default function MagnetSimulator() {
     })]);
     setTotalSimTime(0);
   };
-
   const removeMagnet = () => {
     const effIds = getEffectiveIds();
     if (effIds.size === 0) return;
@@ -627,7 +620,6 @@ export default function MagnetSimulator() {
     setNewGroupName('');
     setActiveGroup(name);
   };
-
   const addToGroup = (gName) => {
     setGroups(prev => {
       const ids = new Set(prev[gName] || []);
@@ -635,7 +627,6 @@ export default function MagnetSimulator() {
       return { ...prev, [gName]: ids };
     });
   };
-
   const removeFromGroup = (gName) => {
     setGroups(prev => {
       const ids = new Set([...(prev[gName] || [])].filter(id => !selectedIds.has(id)));
@@ -647,12 +638,10 @@ export default function MagnetSimulator() {
       return { ...prev, [gName]: ids };
     });
   };
-
   const deleteGroup = (gName) => {
     setGroups(prev => { const next = { ...prev }; delete next[gName]; return next; });
     if (activeGroup === gName) setActiveGroup(null);
   };
-
   const selectGroup = (gName) => {
     if (activeGroup === gName) { setActiveGroup(null); return; }
     setSelectedIds(new Set(groups[gName] || []));
