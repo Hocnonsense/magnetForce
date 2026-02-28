@@ -214,6 +214,14 @@ export default function MagnetSimulator() {
     controls.maxDistance = 50;
     controlsRef.current = controls;
 
+    // 视角操作结束后，重新聚焦键盘捕获区（避免旋转视角后丢焦点）
+    const onControlsEnd = () => {
+      if (keyTrapRef.current && document.activeElement !== keyTrapRef.current) {
+        keyTrapRef.current.focus();
+      }
+    };
+    controls.addEventListener('end', onControlsEnd);
+
     // Lights
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -239,6 +247,7 @@ export default function MagnetSimulator() {
 
     return () => {
       window.removeEventListener('resize', onResize);
+      controls.removeEventListener('end', onControlsEnd);
       controls.dispose();
       renderer.dispose();
       sceneRef.current = null;
@@ -610,42 +619,66 @@ export default function MagnetSimulator() {
   };
 
   // ── 分组操作 ──────────────────────────────────────────────────────────────
-  const createGroup = () => {
-    const name = newGroupName.trim();
-    if (!name || groups[name] || selectedIds.size === 0) return;
+  const createGroup = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    let idx = 1;
+    let name = newGroupName.trim() || `#${idx}`;
+    for (; ; idx++) {
+      if (!groups[name]) break;
+      name = `#${idx}`;
+    }
     setGroups(prev => ({ ...prev, [name]: new Set(selectedIds) }));
     setNewGroupName('');
     setActiveGroup(name);
-  };
-  const addToGroup = (gName) => {
-    setGroups(prev => {
-      const ids = new Set(prev[gName] || []);
-      for (const id of selectedIds) ids.add(id);
-      return { ...prev, [gName]: ids };
-    });
-  };
-  const removeFromGroup = (gName) => {
-    setGroups(prev => {
-      const ids = new Set([...(prev[gName] || [])].filter(id => !selectedIds.has(id)));
-      if (ids.size === 0) {
-        const next = { ...prev }; delete next[gName];
-        if (activeGroup === gName) setActiveGroup(null);
-        return next;
-      }
-      return { ...prev, [gName]: ids };
-    });
-  };
+    setTimeout(() => { if (keyTrapRef.current) keyTrapRef.current.focus(); }, 0);
+  }, [selectedIds]);
   const deleteGroup = (gName) => {
     setGroups(prev => { const next = { ...prev }; delete next[gName]; return next; });
     if (activeGroup === gName) setActiveGroup(null);
   };
   const selectGroup = (gName) => {
-    if (activeGroup === gName) { setActiveGroup(null); return; }
+    if (activeGroup === gName) { setActiveGroup(null); setNewGroupName(''); return; }
     setSelectedIds(new Set(groups[gName] || []));
     setActiveGroup(gName);
+    setNewGroupName('');
     // 聚焦键盘捕获区，使方向键/PageUp/Down 等可用
     setTimeout(() => { if (keyTrapRef.current) keyTrapRef.current.focus(); }, 0);
   };
+  const confirmRename = () => {
+    if (!activeGroup || !newGroupName.trim()) { return; }
+    const newName = newGroupName.trim();
+    if (newName === activeGroup) {
+      setNewGroupName('');
+      return;
+    }
+    if (groups[newName]) { return; } // 名称冲突
+    setGroups(prev => {
+      const next = {};
+      for (const [k, v] of Object.entries(prev)) {
+        next[k === activeGroup ? newName : k] = v;
+      }
+      return next;
+    });
+    setActiveGroup(newName);
+    setNewGroupName('');
+  };
+
+  // ── Ctrl+G / Ctrl+Shift+G 全局快捷键 ────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if ((e.key === 'g' || e.key === 'G') && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          activeGroup && deleteGroup(activeGroup)
+        } else {
+          createGroup();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [createGroup, deleteGroup]);
 
   // ── 批量修改 ──────────────────────────────────────────────────────────────
   const batchSet = (field, value) => {
@@ -661,7 +694,7 @@ export default function MagnetSimulator() {
   // ── 样式 ──────────────────────────────────────────────────────────────────
   const secStyle = { padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' };
   const lbl = { fontSize: '11px', color: '#888', marginBottom: '6px' };
-  const chipBtn = { ...smallBtnStyle, padding: '2px 6px', fontSize: '10px', lineHeight: '1.2' };
+  const chipBtn = { ...smallBtnStyle, padding: '2px', fontSize: '8px', lineHeight: '1' };
 
   // ── 渲染 ──────────────────────────────────────────────────────────────────
   if (!ready) return (
@@ -719,11 +752,89 @@ export default function MagnetSimulator() {
           </div>
         </div>
 
-        {/* ── 选择 ── */}
+        {/* Selected & Grouping Magnet Controls */}
         <div style={secStyle}>
-          <div style={lbl}>
-            选择 ({effIds.size}){activeGroup && ` · 「${activeGroup}」`}
-            <span style={{ fontSize: '10px', color: '#555', marginLeft: '4px' }}>Ctrl+点击多选</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', ...lbl }}>
+            <span>分组</span>
+            {selectedIds.size > 0 && (
+              <span
+                onClick={createGroup}
+                style={{ fontSize: '10px', color: '#6bd5ff', cursor: 'pointer', marginLeft: 'auto' }}
+              >
+                创建分组 (Ctrl+G)
+              </span>
+            )}
+            {activeGroup && (
+              <span
+                onClick={() => {
+                  if (newGroupName.trim() && newGroupName.trim() !== activeGroup) {
+                    confirmRename();
+                  } else {
+                    setActiveGroup(null);
+                    setNewGroupName('');
+                  }
+                }}
+                style={{ fontSize: '10px', color: (newGroupName.trim() && newGroupName.trim() !== activeGroup) ? '#8ab4f8' : '#aaa', cursor: 'pointer', marginLeft: 'auto' }}
+              >
+                {(newGroupName.trim() && newGroupName.trim() !== activeGroup) ? '重命名' : '取消选择'}
+              </span>
+            )}
+            {activeGroup && (
+              <span
+                onClick={() => activeGroup && deleteGroup(activeGroup)}
+                style={{ fontSize: '10px', color: '#ff6b6b', cursor: 'pointer', marginLeft: 'auto' }}
+              >
+                取消分组 (Ctrl+Shift+G)
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
+            {Object.entries(groups).map(([name, ids]) => (
+              activeGroup === name ? (
+                <input
+                  key={name}
+                  autoFocus
+                  value={newGroupName}
+                  placeholder={name}
+                  onChange={e => setNewGroupName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      if (newGroupName.trim() && newGroupName.trim() !== name) confirmRename();
+                      else { setActiveGroup(null); setNewGroupName(''); }
+                    }
+                    if (e.key === 'Escape') { setActiveGroup(null); setNewGroupName(''); }
+                  }}
+                  style={{ padding: '2px 6px', borderRadius: '10px', fontSize: '11px', background: 'rgba(68,136,255,0.15)', border: '1px solid #4488ff', color: '#e0e0e0', outline: 'none', width: '80px' }}
+                />
+              ) : (
+                <span
+                  key={name}
+                  onClick={() => selectGroup(name)}
+                  style={{
+                    padding: '2px 8px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
+                    background: activeGroup === name ? 'rgba(68,136,255,0.2)' : 'rgba(255,255,255,0.06)',
+                    border: `1px solid ${activeGroup === name ? '#4488ff' : 'rgba(255,255,255,0.12)'}`,
+                    color: activeGroup === name ? '#8ab4f8' : '#aaa',
+                  }}
+                >
+                  {name} <span style={{ opacity: 0.5 }}>({ids.size})</span>
+                  <button onClick={(e) => { e.stopPropagation(); deleteGroup(name); }} style={{ ...chipBtn, color: '#ff6b6b' }} title="删除组">✕</button>
+                </span>
+              )
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', ...lbl, marginTop: '8px' }}>
+            <span>
+              {selectedIds.size > 0 ? `Shift+单击多选` : '单击选择'}
+              ({selectedIds.size}){activeGroup && ` · 「${activeGroup}」`}</span>
+            {selectedIds.size > 0 && (
+              <span
+                onClick={removeMagnet}
+                style={{ fontSize: '10px', color: '#ff6b6b', cursor: 'pointer', marginLeft: 'auto' }}
+              >
+                删除
+              </span>
+            )}
           </div>
           {selectedIds.size > 0 && (
             <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', marginBottom: '6px' }}>
@@ -732,54 +843,9 @@ export default function MagnetSimulator() {
               ))}
             </div>
           )}
-          {effIds.size > 0 && (
-            <button onClick={removeMagnet} style={{ ...smallBtnStyle, background: '#3a1a1a', borderColor: '#5a2a2a', width: '100%' }}>
-              🗑 删除 ({effIds.size})
-            </button>
-          )}
           <div style={{ fontSize: '10px', color: '#555', marginTop: '6px' }}>
             ↑↓←→ 移动 · Shift+↑↓ 前后 · PgUp/Home PgDn/End 旋转 · 选择分组后可用
           </div>
-        </div>
-
-        {/* Selected Magnet Controls */}
-        {/* ── 分组 ── */}
-        <div style={secStyle}>
-          <div style={lbl}>分组 <span style={{ color: '#555' }}>（球可属于多组）</span></div>
-          <div style={{ display: 'flex', gap: '4px', marginBottom: '6px' }}>
-            <input
-              value={newGroupName}
-              onChange={e => setNewGroupName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && createGroup()}
-              placeholder="分组名…"
-              style={{ flex: 1, padding: '3px 6px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#e0e0e0', fontSize: '11px', outline: 'none' }}
-            />
-            <button onClick={createGroup} disabled={!newGroupName.trim() || selectedIds.size === 0}
-              style={{ ...smallBtnStyle, opacity: (!newGroupName.trim() || selectedIds.size === 0) ? 0.4 : 1 }}>+</button>
-          </div>
-          {Object.keys(groups).length === 0 && (
-            <div style={{ fontSize: '10px', color: '#555', fontStyle: 'italic' }}>选择球后创建分组</div>
-          )}
-          {Object.entries(groups).map(([name, ids]) => (
-            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
-              <span
-                onClick={() => selectGroup(name)}
-                style={{
-                  padding: '2px 8px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
-                  background: activeGroup === name ? 'rgba(68,136,255,0.2)' : 'rgba(255,255,255,0.06)',
-                  border: `1px solid ${activeGroup === name ? '#4488ff' : 'rgba(255,255,255,0.12)'}`,
-                  color: activeGroup === name ? '#8ab4f8' : '#aaa',
-                }}
-              >
-                {name} <span style={{ opacity: 0.5 }}>({ids.size})</span>
-              </span>
-              {selectedIds.size > 0 && <>
-                <button onClick={() => addToGroup(name)} style={chipBtn} title="添加选中">+</button>
-                <button onClick={() => removeFromGroup(name)} style={chipBtn} title="移除选中">−</button>
-              </>}
-              <button onClick={() => deleteGroup(name)} style={{ ...chipBtn, color: '#ff6b6b' }} title="删除组">✕</button>
-            </div>
-          ))}
         </div>
 
         {/* ── 批量修改 ── */}
