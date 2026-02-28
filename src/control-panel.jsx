@@ -467,6 +467,10 @@ export default function MagnetSimulator() {
       case 'PageDown': rotAxis = right.clone(); break;
       case 'Home': rotAxis = up.clone().negate(); break;
       case 'End': rotAxis = up.clone(); break;
+      case 'Tab':
+        e.preventDefault();
+        rotAxis = e.shiftKey ? forward.clone().negate() : forward.clone();
+        break;
     }
     if (delta) {
       e.preventDefault();
@@ -664,20 +668,35 @@ export default function MagnetSimulator() {
   };
 
   // ── Ctrl+G / Ctrl+Shift+G 全局快捷键 ────────────────────────────────────
-  // 使用捕获阶段（capture: true）+ stopImmediatePropagation 以覆盖 Edge/Chrome 的 Ctrl+G 查找行为
   useEffect(() => {
     const handler = (e) => {
+      if (e.target.tagName === 'INPUT' && e.target !== keyTrapRef.current) return;
       if ((e.key === 'g' || e.key === 'G') && (e.ctrlKey || e.metaKey)) {
+        // 使用捕获阶段（capture: true）+ stopImmediatePropagation 以覆盖 Edge/Chrome 的 Ctrl+G 查找行为
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        console.log(`e.target.tagName=${e.target.tagName}, shiftKey=${e.shiftKey}`);
-        if (e.target.tagName === 'INPUT' && e.target !== keyTrapRef.current) return;
         if (e.shiftKey) {
           activeGroup && deleteGroup(activeGroup)
         } else {
           createGroup();
         }
+      } else if ((e.key === 'a' || e.key === 'A') && (e.ctrlKey || e.metaKey)) {
+        // Ctrl+A 全选全体对象 (无 activeGroup)，或组内对象 (有 activeGroup)
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setSelectedIds(prev => {
+          // 1. 确定操作范围：组内 or 全局
+          const scopeIds = activeGroup
+            ? [...(groups[activeGroup] || [])]
+            : stateRef.current.magnets.map(m => m.id);
+          // 2. 核心逻辑：无 Shift = 全选范围；有 Shift = 范围内“未选中”部分（即反选范围内容）
+          const nextIds = e.shiftKey
+            ? scopeIds.filter(id => !prev.has(id)) // 保留范围中当前未选中的
+            : scopeIds;                           // 全选范围（会清除范围外选中）
+          return new Set(nextIds);
+        });
       }
     };
     window.addEventListener('keydown', handler, true); // capture phase
@@ -827,6 +846,11 @@ export default function MagnetSimulator() {
               )
             ))}
           </div>
+          {activeGroup && (
+            <div style={{ fontSize: '10px', color: '#555', marginTop: '6px' }}>
+              ↑↓←→ 移动 · PgUp/Home PgDn/End Tab/Shift+Tab 旋转
+            </div>)
+          }
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', ...lbl, marginTop: '8px' }}>
             <span>
               {selectedIds.size > 0 ? `Shift+单击多选` : '单击选择'}
@@ -847,9 +871,6 @@ export default function MagnetSimulator() {
               ))}
             </div>
           )}
-          <div style={{ fontSize: '10px', color: '#555', marginTop: '6px' }}>
-            ↑↓←→ 移动 · Shift+↑↓ 前后 · PgUp/Home PgDn/End 旋转 · 选择分组后可用
-          </div>
         </div>
 
         {/* ── 批量修改 ── */}
