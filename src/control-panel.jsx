@@ -7,7 +7,9 @@ import initMagnetWorld from './physics/world';
 import { assertVec3 } from './utils/three';
 import { useUndoHistory } from './hooks/useUndoHistory';
 import { usePhysicsLoop } from './hooks/usePhysicsLoop';
-import { SimSection, SelectedMagnetPanel } from './components/magnet-panel-components';
+import { SimSection, SelectedMagnetPanel } from './components/MagnetPanelComponents';
+import { PresetPanel } from './components/PresetPanel';
+import { GroupPanel } from './components/GroupPanel';
 import {
   smallBtnStyle, presetBtnStyle, secStyle, lbl, chipBtn
 } from './styles';
@@ -733,10 +735,8 @@ export default function MagnetSimulator() {
     const center = getMagnetsCenter(groupMags);
     const relativeMags = groupMags.map(m => ({
       pos: [m.pos[0] - center.x, m.pos[1] - center.y, m.pos[2] - center.z],
-      vel: [0, 0, 0],
       moment: [...m.moment],
-      color: m.color,
-      fixed: m.fixed ?? false,
+      color: m.color
     }));
     setCustomPresets(prev => ({ ...prev, [activeGroup]: { magnets: relativeMags } }));
   }, [activeGroup, groups, magnets]);
@@ -857,162 +857,30 @@ export default function MagnetSimulator() {
         </div>
 
         {/* Presets */}
-        <div>
-          <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>预设结构</div>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {presets.map(name => (
-              <button
-                key={name}
-                onClick={() => applyPreset(name)}
-                style={presetBtnStyle}
-              >
-                {name}
-              </button>
-            ))}
-          </div>
-          {/* 自定义预设（从分组保存，可拖放到 3D 视图） */}
-          {Object.keys(customPresets).length > 0 && (
-            <>
-              <div style={{ fontSize: '10px', color: '#666', marginTop: '8px', marginBottom: '4px' }}>自定义预设（拖放到视图中添加）</div>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {Object.entries(customPresets).map(([name, p]) => (
-                  <span
-                    key={name}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('text/x-preset-name', name);
-                      e.dataTransfer.effectAllowed = 'copy';
-                    }}
-                    style={{
-                      ...presetBtnStyle,
-                      cursor: 'grab',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                    }}
-                  >
-                    {name} <span style={{ opacity: 0.5 }}>({p.magnets.length})</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCustomPresets(prev => { const next = { ...prev }; delete next[name]; return next; });
-                      }}
-                      style={{ ...chipBtn, color: '#ff6b6b', cursor: 'pointer' }}
-                      title="删除预设"
-                    >✕</button>
-                  </span>
-                ))}
-              </div>
-            </>
-          )}
-          {/* 保存当前分组为预设 */}
-          {activeGroup && groups[activeGroup] && groups[activeGroup].size > 0 && (
-            <button
-              onClick={saveGroupAsPreset}
-              style={{ ...smallBtnStyle, marginTop: '6px', width: '100%', background: '#1a2a3a', borderColor: '#2a4a6a' }}
-            >
-              💾 保存「{activeGroup}」为预设
-            </button>
-          )}
-        </div>
+        <PresetPanel
+          groups={groups}
+          activeGroup={activeGroup}
+          presets={presets}
+          customPresets={customPresets}
+          setCustomPresets={setCustomPresets}
+          applyPreset={applyPreset}
+          saveGroupAsPreset={saveGroupAsPreset}
+        />
 
         {/* Selected & Grouping Magnet Controls */}
-        <div style={secStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', ...lbl }}>
-            <span>分组</span>
-            {selectedIds.size > 0 && (
-              <span
-                onClick={createGroup}
-                style={{ fontSize: '10px', color: '#6bd5ff', cursor: 'pointer', marginLeft: 'auto' }}
-              >
-                创建分组 (Ctrl+G)
-              </span>
-            )}
-            {activeGroup && (
-              <span
-                onClick={() => {
-                  if (newGroupName.trim() && newGroupName.trim() !== activeGroup) {
-                    confirmRename();
-                  } else {
-                    setActiveGroup(null);
-                    setNewGroupName('');
-                  }
-                }}
-                style={{ fontSize: '10px', color: (newGroupName.trim() && newGroupName.trim() !== activeGroup) ? '#8ab4f8' : '#aaa', cursor: 'pointer', marginLeft: 'auto' }}
-              >
-                {(newGroupName.trim() && newGroupName.trim() !== activeGroup) ? '重命名' : '取消选择'}
-              </span>
-            )}
-            {activeGroup && (
-              <span
-                onClick={() => activeGroup && deleteGroup(activeGroup)}
-                style={{ fontSize: '10px', color: '#ff6b6b', cursor: 'pointer', marginLeft: 'auto' }}
-              >
-                取消分组 (Ctrl+Shift+G)
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
-            {Object.entries(groups).map(([name, ids]) => (
-              activeGroup === name ? (
-                <input
-                  key={name}
-                  autoFocus
-                  value={newGroupName}
-                  placeholder={name}
-                  onChange={e => setNewGroupName(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      if (newGroupName.trim() && newGroupName.trim() !== name) confirmRename();
-                      else { setActiveGroup(null); setNewGroupName(''); }
-                    }
-                    if (e.key === 'Escape') { setActiveGroup(null); setNewGroupName(''); }
-                  }}
-                  style={{ padding: '2px 6px', borderRadius: '10px', fontSize: '11px', background: 'rgba(68,136,255,0.15)', border: '1px solid #4488ff', color: '#e0e0e0', outline: 'none', width: '80px' }}
-                />
-              ) : (
-                <span
-                  key={name}
-                  onClick={() => selectGroup(name)}
-                  style={{
-                    padding: '2px 8px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
-                    background: activeGroup === name ? 'rgba(68,136,255,0.2)' : 'rgba(255,255,255,0.06)',
-                    border: `1px solid ${activeGroup === name ? '#4488ff' : 'rgba(255,255,255,0.12)'}`,
-                    color: activeGroup === name ? '#8ab4f8' : '#aaa',
-                  }}
-                >
-                  {name} <span style={{ opacity: 0.5 }}>({ids.size})</span>
-                  <button onClick={(e) => { e.stopPropagation(); deleteGroup(name); }} style={{ ...chipBtn, color: '#ff6b6b' }} title="删除组">✕</button>
-                </span>
-              )
-            ))}
-          </div>
-          {activeGroup && (
-            <div style={{ fontSize: '10px', color: '#555', marginTop: '6px' }}>
-              ↑↓←→ 移动 · PgUp/Home PgDn/End Tab/Shift+Tab 旋转
-            </div>)
-          }
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', ...lbl, marginTop: '8px' }}>
-            <span>
-              {selectedIds.size > 0 ? `Shift+单击多选` : '单击选择'}
-              ({selectedIds.size}){activeGroup && ` · 「${activeGroup}」`}</span>
-            {selectedIds.size > 0 && (
-              <span
-                onClick={removeMagnet}
-                style={{ fontSize: '10px', color: '#ff6b6b', cursor: 'pointer', marginLeft: 'auto' }}
-              >
-                删除
-              </span>
-            )}
-          </div>
-          {selectedIds.size > 0 && (
-            <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', marginBottom: '6px' }}>
-              {[...selectedIds].map(id => (
-                <span key={id} style={{ padding: '0 5px', borderRadius: '3px', fontSize: '10px', background: 'rgba(68,136,255,0.15)', border: '1px solid rgba(68,136,255,0.3)', color: '#8ab4f8' }}>#{id}</span>
-              ))}
-            </div>
-          )}
-        </div>
+        <GroupPanel
+          groups={groups}
+          activeGroup={activeGroup}
+          newGroupName={newGroupName}
+          selectedIds={selectedIds}
+          onCreateGroup={createGroup}
+          onSelectGroup={selectGroup}
+          onDeleteGroup={deleteGroup}
+          onConfirmRename={confirmRename}
+          onSetNewGroupName={setNewGroupName}
+          onDeselect={() => { setActiveGroup(null); setNewGroupName(''); }}
+          onRemoveMagnet={removeMagnet}
+        />
 
         {/* ── 批量修改 ── */}
         {effIds.size > 1 && (
