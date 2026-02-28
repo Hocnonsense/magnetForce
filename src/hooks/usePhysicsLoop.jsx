@@ -33,7 +33,7 @@ const BOUND = 0.1;     // 位置边界 (m)
  * @param {React.RefObject} rendererRef,
  * @param {React.RefObject} controlsRef,
  * @param {React.RefObject} needsSyncRef,
- * @param {React.RefObject<number|null>} selectedIdRef,
+ * @param {React.RefObject<Set<number>>} selectedIdsRef,
  * @param {Function} setMagnets,
  * @param {Function} setEditDraft,
  * @param {Function} setTotalSimTime,
@@ -48,7 +48,7 @@ export function usePhysicsLoop(magnetWorldRef,
   rendererRef,
   controlsRef,
   needsSyncRef,
-  selectedIdRef,
+  selectedIdsRef,
   setMagnets,
   setEditDraft,
   setTotalSimTime,
@@ -88,10 +88,10 @@ export function usePhysicsLoop(magnetWorldRef,
     setMagnets(bounded);
     needsSyncRef.current = true;
 
-    // 同批次更新 editDraft，避免 magnets useEffect 连锁触发
-    const selId = selectedIdRef.current;
-    if (selId !== null) {
-      const mag = bounded.find(m => m.id === selId);
+    // 同批次更新 editDraft，避免 magnets useEffect 连锁触发, 仅当选择一个时更新编辑面板
+    const selIds = selectedIdsRef.current;
+    if (selIds.size === 1) {
+      const mag = bounded.find(m => selIds.has(m.id));
       if (mag) {
         setEditDraft(d => d ? {
           ...d,
@@ -105,7 +105,7 @@ export function usePhysicsLoop(magnetWorldRef,
     }
   }, [
     stateRef, magnetWorldRef, needsSyncRef,
-    selectedIdRef, setMagnets, setEditDraft, setTotalSimTime, fmt,
+    selectedIdsRef, setMagnets, setEditDraft, setTotalSimTime, fmt,
   ]);
 
   // rAF 循环：渲染 + 定时触发物理步

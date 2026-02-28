@@ -12,13 +12,15 @@ import { smallBtnStyle, presetBtnStyle } from './styles';
 
 // Simulation constants
 const VISUAL_SCALE = 100;
+/** 白圈屏幕像素宽度（固定） */
+const RING_PX = 3;
 
 export default function MagnetSimulator() {
   const MAGNET_RADIUS = 0.0025; // 5mm diameter
   const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
 
   const [magnets, setMagnets] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
   const [refYId, setRefYId] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simSpeed, setSimSpeed] = useState(0.00004);
@@ -30,6 +32,12 @@ export default function MagnetSimulator() {
   const [presets, setPresets] = useState([]);
   const [ready, setReady] = useState(false);
 
+  // ── 分组：纯 id 集合，无颜色 ─────────────────────────────────────────────
+  // { [name]: Set<id> }
+  const [groups, setGroups] = useState({});
+  const [activeGroup, setActiveGroup] = useState(null);
+  const [newGroupName, setNewGroupName] = useState('');
+
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
@@ -39,9 +47,10 @@ export default function MagnetSimulator() {
   const arrowsRef = useRef([]);
   const forceArrowsRef = useRef([]);
   const torqueArrowsRef = useRef([]);
+  const ringsRef = useRef([]);
   const needsSyncRef = useRef(true);
-  const selectedIdRef = useRef(null);
-  selectedIdRef.current = selectedId;
+  const selectedIdsRef = useRef(new Set());
+  selectedIdsRef.current = selectedIds;
 
   // 最新参数 ref，避免闭包捕获旧值
   const stateRef = useRef({ magnets, isSimulating, simSpeed, rotateMoments, useGravity });
@@ -67,6 +76,18 @@ export default function MagnetSimulator() {
       .catch(console.error);
   }, []);
 
+  // 兼容：单选时提供 selectedId
+  const selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
+
+  // 合并手动选择 + 激活分组
+  const getEffectiveIds = useCallback(() => {
+    const ids = new Set(selectedIds);
+    if (activeGroup && groups[activeGroup]) {
+      for (const id of groups[activeGroup]) ids.add(id);
+    }
+    return ids;
+  }, [selectedIds, activeGroup, groups]);
+
   // ── 撤销历史 ──────────────────────────────────────────────────────────────
   const { push: pushUndo, reset: resetUndo, histIdxRef } = useUndoHistory({
     getMagnets: () => stateRef.current.magnets,
@@ -84,9 +105,65 @@ export default function MagnetSimulator() {
   const { stepDeltaTimeRef } = usePhysicsLoop(
     magnetWorldRef, stateRef, ready,
     containerRef, sceneRef, cameraRef, rendererRef, controlsRef,
-    needsSyncRef, selectedIdRef,
+    needsSyncRef, selectedIdsRef,
     setMagnets, setEditDraft, setTotalSimTime, fmt,
   );
+
+  // ── 工具：白圈世界宽度 & 碰撞检测 ────────────────────────────────────────
+  /**
+   * 根据当前相机距离算白圈在物理坐标下的宽度
+   * @param {THREE.Vector3} [refPoint] 参考点（默认原点）
+   * @returns {number} 物理坐标步长
+   */
+  const getRingWorldWidth = useCallback((refPoint) => {
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    if (!camera || !renderer) return MAGNET_RADIUS;
+    const target = refPoint ?? new THREE.Vector3(0, 0, 0);
+    const dist = camera.position.distanceTo(target);
+    const fov = camera.fov * Math.PI / 180;
+    const screenH = renderer.domElement.height;
+    const pixelPerUnit = screenH / (2 * dist * Math.tan(fov / 2));
+    // 视觉坐标宽度 → 物理坐标宽度
+    return RING_PX / pixelPerUnit / VISUAL_SCALE;
+  }, [MAGNET_RADIUS]);
+
+  /** 检查 movedIds 平移 delta 后是否与其他球碰撞 */
+  const canMove = useCallback((mags, movedIds, delta) => {
+    const minD = MAGNET_RADIUS * 2 * 0.999;
+    for (const m of mags) {
+      if (!movedIds.has(m.id)) continue;
+      const np = m.pos.map((p, i) => p + delta[i]);
+      for (const o of mags) {
+        if (o.id === m.id || movedIds.has(o.id)) continue;
+        const dx = np[0] - o.pos[0], dy = np[1] - o.pos[1], dz = np[2] - o.pos[2];
+        if (Math.sqrt(dx * dx + dy * dy + dz * dz) < minD) return false;
+      }
+    }
+    return true;
+  }, [MAGNET_RADIUS]);
+
+  /** 检查 ids 绕 center 旋转 angle（弧度）后是否碰撞 */
+  const canRotate = useCallback((mags, ids, center, axis, angle) => {
+    const minD = MAGNET_RADIUS * 2 * 0.999;
+    const q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+    const newPos = new Map();
+    for (const m of mags) {
+      if (ids.has(m.id)) {
+        const v = new THREE.Vector3(...m.pos).sub(center);
+        v.applyQuaternion(q).add(center);
+        newPos.set(m.id, [v.x, v.y, v.z]);
+      }
+    }
+    for (const [id, np] of newPos) {
+      for (const o of mags) {
+        if (o.id === id || ids.has(o.id)) continue;
+        const dx = np[0] - o.pos[0], dy = np[1] - o.pos[1], dz = np[2] - o.pos[2];
+        if (Math.sqrt(dx * dx + dy * dy + dz * dz) < minD) return false;
+      }
+    }
+    return true;
+  }, [MAGNET_RADIUS]);
 
   // ── Three.js 初始化 ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -155,13 +232,14 @@ export default function MagnetSimulator() {
     };
   }, [ready]);
 
-  // 创建/销毁 mesh 和 arrow —— 仅当磁球数量或 showVectors 变化时
+  // ── 创建/销毁 mesh + arrow + 白圈 ────────────────────────────────────────
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
 
     // 销毁旧对象（释放 GPU 资源）
     const disposeObj = (o) => {
+      if (!o) return;
       scene.remove(o);
       if (o.geometry) o.geometry.dispose();
       if (o.material) {
@@ -171,7 +249,7 @@ export default function MagnetSimulator() {
       // ArrowHelper 是 Group，递归子对象
       if (o.children) o.children.forEach(disposeObj);
     };
-    [...meshesRef.current, ...arrowsRef.current, ...forceArrowsRef.current, ...torqueArrowsRef.current]
+    [...meshesRef.current, ...arrowsRef.current, ...forceArrowsRef.current, ...torqueArrowsRef.current, ...ringsRef.current]
       .forEach(disposeObj);
 
     const dummyDir = new THREE.Vector3(0, 1, 0);
@@ -179,6 +257,7 @@ export default function MagnetSimulator() {
     const arrows = [];
     const forceArrows = [];
     const torqueArrows = [];
+    const rings = [];
 
     magnets.forEach(mag => {
       // Sphere
@@ -194,6 +273,19 @@ export default function MagnetSimulator() {
       mesh.userData.id = mag.id;
       scene.add(mesh);
       meshes.push(mesh);
+
+      // 白圈（Torus，初始不可见）
+      const ringGeo = new THREE.TorusGeometry(VISUAL_RADIUS * 1.12, 0.02, 16, 64);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.85,
+        depthTest: false,
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.visible = false;
+      ring.renderOrder = 999;
+      scene.add(ring);
+      rings.push(ring);
+
       if (!showVectors) {
         arrows.push(null);
         forceArrows.push(null);
@@ -225,15 +317,21 @@ export default function MagnetSimulator() {
     arrowsRef.current = arrows;
     forceArrowsRef.current = forceArrows;
     torqueArrowsRef.current = torqueArrows;
+    ringsRef.current = rings;
   }, [magnets.length, showVectors, ready]);
 
-  // 更新 mesh/arrow 的位置、方向、外观 —— 每当 magnets 或 selectedId 变化
+  // ── 更新位置/外观/白圈 ────────────────────────────────────────────────────
   useEffect(() => {
-    if (!sceneRef.current) return;
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    if (!sceneRef.current || !camera || !renderer) return;
+
     const meshes = meshesRef.current;
     const arrows = arrowsRef.current;
     const forceArrows = forceArrowsRef.current;
     const torqueArrows = torqueArrowsRef.current;
+    const ringMeshes = ringsRef.current;
+    const effIds = getEffectiveIds();
 
     magnets.forEach((mag, idx) => {
       const scaled = mag.pos.map(p => p * VISUAL_SCALE);
@@ -243,8 +341,29 @@ export default function MagnetSimulator() {
       const mesh = meshes[idx];
       if (mesh) {
         mesh.position.copy(origin);
-        mesh.material.emissiveIntensity = selectedId === mag.id ? 0.4 : 0.15;
+        mesh.material.emissiveIntensity = effIds.has(mag.id) ? 0.4 : 0.15;
       }
+
+      // 白圈
+      const ring = ringMeshes[idx];
+      if (ring) {
+        const sel = effIds.has(mag.id);
+        ring.visible = sel;
+        if (sel) {
+          ring.position.copy(origin);
+          ring.lookAt(camera.position);
+          // 固定像素宽度 → 动态世界宽度
+          const dist = camera.position.distanceTo(origin);
+          const fov = camera.fov * Math.PI / 180;
+          const pxPerUnit = renderer.domElement.height / (2 * dist * Math.tan(fov / 2));
+          const thickness = RING_PX / pxPerUnit;
+          const majorR = VISUAL_RADIUS + thickness * 1.5;
+          const minorR = thickness * 0.5;
+          ring.geometry.dispose();
+          ring.geometry = new THREE.TorusGeometry(majorR, minorR, 8, 64);
+        }
+      }
+
       if (!showVectors) return;
       /** @type {THREE.ArrowHelper} Moment arrow */
       const arrow = arrows[idx];
@@ -286,7 +405,7 @@ export default function MagnetSimulator() {
         }
       }
     });
-  }, [magnets, selectedId, showVectors, ready]);
+  }, [magnets, selectedIds, activeGroup, groups, showVectors, ready]);
 
   // editDraft 随选中同步（模拟中由 physicsStep 直接更新）
   useEffect(() => {
@@ -295,7 +414,96 @@ export default function MagnetSimulator() {
     setEditDraft(mag ? magnetToDraft(mag) : null);
   }, [selectedId]);
 
-  // ── 操作函数 ──────────────────────────────────────────────────────────────
+  // ── 键盘输入捕获 ──────────────────────────────────────────────────────────
+  // 用隐藏 textarea 捕获按键，避免浏览器滚动条拦截方向键/PageUp/Down 等
+  const keyTrapRef = useRef(null);
+
+  // 点击 3D 区域时不再自动聚焦 keyTrap，仅选择分组时聚焦
+
+  const handleKeyDown = useCallback((e) => {
+    // 模拟中不允许移动/旋转
+    if (stateRef.current.isSimulating) return;
+    const effIds = getEffectiveIds();
+    if (effIds.size === 0) return;
+    const camera = cameraRef.current;
+    if (!camera) return;
+
+    // 相机空间方向
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    right.crossVectors(forward, camera.up).normalize();
+    up.crossVectors(right, forward).normalize();
+
+    // 选中球的质心（物理坐标）
+    const currentMags = stateRef.current.magnets;
+    let cx = 0, cy = 0, cz = 0, cnt = 0;
+    for (const m of currentMags) {
+      if (effIds.has(m.id)) { cx += m.pos[0]; cy += m.pos[1]; cz += m.pos[2]; cnt++; }
+    }
+    const center = new THREE.Vector3(cx / cnt * VISUAL_SCALE, cy / cnt * VISUAL_SCALE, cz / cnt * VISUAL_SCALE);
+
+    // 白圈世界宽度（物理坐标）
+    const ringW = getRingWorldWidth(center);
+
+    // ── 方向键：平移 ──
+    let delta = null;
+    switch (e.key) {
+      case 'ArrowRight': delta = [right.x * ringW, right.y * ringW, right.z * ringW]; break;
+      case 'ArrowLeft': delta = [-right.x * ringW, -right.y * ringW, -right.z * ringW]; break;
+      case 'ArrowUp':
+        if (e.shiftKey) delta = [forward.x * ringW, forward.y * ringW, forward.z * ringW];
+        else delta = [up.x * ringW, up.y * ringW, up.z * ringW];
+        break;
+      case 'ArrowDown':
+        if (e.shiftKey) delta = [-forward.x * ringW, -forward.y * ringW, -forward.z * ringW];
+        else delta = [-up.x * ringW, -up.y * ringW, -up.z * ringW];
+        break;
+    }
+    if (delta) {
+      e.preventDefault();
+      setMagnets(prev => {
+        if (!canMove(prev, effIds, delta)) return prev;
+        needsSyncRef.current = true;
+        return prev.map(m => effIds.has(m.id)
+          ? { ...m, pos: m.pos.map((p, i) => p + delta[i]) }
+          : m
+        );
+      });
+      return;
+    }
+
+    // ── PageUp/Home = 逆时针，PageDown/End = 顺时针 ──
+    // 绕相机上方向轴旋转（以质心为中心）
+    // 旋转步长 = arctan(ringW / MAGNET_RADIUS)
+    // 缩小→ringW大→步长大；放大→ringW小→步长小
+    let rotSign = 0;
+    if (e.key === 'PageUp' || e.key === 'Home') rotSign = 1;
+    else if (e.key === 'PageDown' || e.key === 'End') rotSign = -1;
+    if (rotSign === 0) return;
+
+    e.preventDefault();
+    const angle = rotSign * Math.atan2(ringW, MAGNET_RADIUS);
+    const axis = up.clone().normalize();
+    const centerPhys = new THREE.Vector3(cx / cnt, cy / cnt, cz / cnt);
+    const q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+
+    setMagnets(prev => {
+      if (!canRotate(prev, effIds, centerPhys, axis, angle)) return prev;
+      needsSyncRef.current = true;
+      return prev.map(m => {
+        if (!effIds.has(m.id)) return m;
+        const v = new THREE.Vector3(...m.pos).sub(centerPhys);
+        v.applyQuaternion(q).add(centerPhys);
+        // 同步旋转磁矩
+        const mom = new THREE.Vector3(...m.moment).applyQuaternion(q);
+        return { ...m, pos: [v.x, v.y, v.z], moment: [mom.x, mom.y, mom.z] };
+      });
+    });
+  }, [getEffectiveIds, canMove, canRotate, getRingWorldWidth, MAGNET_RADIUS]);
+
+  // ── 点击选择 ──────────────────────────────────────────────────────────────
   const handleClick = (e) => {
     const container = containerRef.current;
     const camera = cameraRef.current;
@@ -310,9 +518,24 @@ export default function MagnetSimulator() {
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, camera);
     const hits = raycaster.intersectObjects(meshesRef.current);
-    setSelectedId(hits.length > 0 ? hits[0].object.userData.id : null);
+    const hitId = hits.length > 0 ? hits[0].object.userData.id : null;
+
+    if (hitId === null) {
+      if (!e.ctrlKey && !e.metaKey) setSelectedIds(new Set());
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        next.has(hitId) ? next.delete(hitId) : next.add(hitId);
+        return next;
+      });
+    } else {
+      setSelectedIds(new Set([hitId]));
+    }
   };
 
+  // ── 磁球操作 ──────────────────────────────────────────────────────────────
   const addMagnet = () => {
     needsSyncRef.current = true;
     setMagnets(prev => [...prev, createMagnet({
@@ -323,10 +546,20 @@ export default function MagnetSimulator() {
   };
 
   const removeMagnet = () => {
-    if (selectedId === null) return;
+    const effIds = getEffectiveIds();
+    if (effIds.size === 0) return;
     needsSyncRef.current = true;
-    setMagnets(prev => prev.filter(m => m.id !== selectedId));
-    setSelectedId(null);
+    setMagnets(prev => prev.filter(m => !effIds.has(m.id)));
+    // 从分组中清理
+    setGroups(prev => {
+      const next = {};
+      for (const [name, ids] of Object.entries(prev)) {
+        const kept = new Set([...ids].filter(id => !effIds.has(id)));
+        if (kept.size > 0) next[name] = kept;
+      }
+      return next;
+    });
+    setSelectedIds(new Set());
     setTotalSimTime(0);
   };
 
@@ -336,7 +569,9 @@ export default function MagnetSimulator() {
     needsSyncRef.current = true;
     resetMagnetIdCounter(); // 确保预设加载的磁球 ID 从 0 开始连续
     loadPreset(name, MAGNET_RADIUS).then(res => setMagnets(res.magnets));
-    setSelectedId(null);
+    setSelectedIds(new Set());
+    setGroups({});
+    setActiveGroup(null);
     setIsSimulating(false);
     setTotalSimTime(0);
   };
@@ -384,12 +619,72 @@ export default function MagnetSimulator() {
     setIsSimulating(v => !v);
   };
 
+  // ── 分组操作 ──────────────────────────────────────────────────────────────
+  const createGroup = () => {
+    const name = newGroupName.trim();
+    if (!name || groups[name] || selectedIds.size === 0) return;
+    setGroups(prev => ({ ...prev, [name]: new Set(selectedIds) }));
+    setNewGroupName('');
+    setActiveGroup(name);
+  };
+
+  const addToGroup = (gName) => {
+    setGroups(prev => {
+      const ids = new Set(prev[gName] || []);
+      for (const id of selectedIds) ids.add(id);
+      return { ...prev, [gName]: ids };
+    });
+  };
+
+  const removeFromGroup = (gName) => {
+    setGroups(prev => {
+      const ids = new Set([...(prev[gName] || [])].filter(id => !selectedIds.has(id)));
+      if (ids.size === 0) {
+        const next = { ...prev }; delete next[gName];
+        if (activeGroup === gName) setActiveGroup(null);
+        return next;
+      }
+      return { ...prev, [gName]: ids };
+    });
+  };
+
+  const deleteGroup = (gName) => {
+    setGroups(prev => { const next = { ...prev }; delete next[gName]; return next; });
+    if (activeGroup === gName) setActiveGroup(null);
+  };
+
+  const selectGroup = (gName) => {
+    if (activeGroup === gName) { setActiveGroup(null); return; }
+    setSelectedIds(new Set(groups[gName] || []));
+    setActiveGroup(gName);
+    // 聚焦键盘捕获区，使方向键/PageUp/Down 等可用
+    setTimeout(() => { if (keyTrapRef.current) keyTrapRef.current.focus(); }, 0);
+  };
+
+  // ── 批量修改 ──────────────────────────────────────────────────────────────
+  const batchSet = (field, value) => {
+    const ids = getEffectiveIds();
+    if (ids.size === 0) return;
+    pushUndo(magnets);
+    needsSyncRef.current = true;
+    const next = magnets.map(m => ids.has(m.id) ? { ...m, [field]: value } : m);
+    pushUndo(next); histIdxRef.current = -1;
+    setMagnets(next);
+  };
+
+  // ── 样式 ──────────────────────────────────────────────────────────────────
+  const secStyle = { padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' };
+  const lbl = { fontSize: '11px', color: '#888', marginBottom: '6px' };
+  const chipBtn = { ...smallBtnStyle, padding: '2px 6px', fontSize: '10px', lineHeight: '1.2' };
+
   // ── 渲染 ──────────────────────────────────────────────────────────────────
   if (!ready) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#08080f', color: '#e0e0e0', fontFamily: 'system-ui' }}>
       <div><div style={{ fontSize: '24px', marginBottom: '10px' }}>🧲</div><div>Loading physics engine...</div></div>
     </div>
   );
+
+  const effIds = getEffectiveIds();
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100vh', background: '#08080f', fontFamily: 'system-ui, -apple-system, sans-serif', color: '#e0e0e0' }}>
@@ -438,7 +733,114 @@ export default function MagnetSimulator() {
           </div>
         </div>
 
+        {/* ── 选择 ── */}
+        <div style={secStyle}>
+          <div style={lbl}>
+            选择 ({effIds.size}){activeGroup && ` · 「${activeGroup}」`}
+            <span style={{ fontSize: '10px', color: '#555', marginLeft: '4px' }}>Ctrl+点击多选</span>
+          </div>
+          {selectedIds.size > 0 && (
+            <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', marginBottom: '6px' }}>
+              {[...selectedIds].map(id => (
+                <span key={id} style={{ padding: '0 5px', borderRadius: '3px', fontSize: '10px', background: 'rgba(68,136,255,0.15)', border: '1px solid rgba(68,136,255,0.3)', color: '#8ab4f8' }}>#{id}</span>
+              ))}
+            </div>
+          )}
+          {effIds.size > 0 && (
+            <button onClick={removeMagnet} style={{ ...smallBtnStyle, background: '#3a1a1a', borderColor: '#5a2a2a', width: '100%' }}>
+              🗑 删除 ({effIds.size})
+            </button>
+          )}
+          <div style={{ fontSize: '10px', color: '#555', marginTop: '6px' }}>
+            ↑↓←→ 移动 · Shift+↑↓ 前后 · PgUp/Home PgDn/End 旋转 · 选择分组后可用
+          </div>
+        </div>
+
         {/* Selected Magnet Controls */}
+        {/* ── 分组 ── */}
+        <div style={secStyle}>
+          <div style={lbl}>分组 <span style={{ color: '#555' }}>（球可属于多组）</span></div>
+          <div style={{ display: 'flex', gap: '4px', marginBottom: '6px' }}>
+            <input
+              value={newGroupName}
+              onChange={e => setNewGroupName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && createGroup()}
+              placeholder="分组名…"
+              style={{ flex: 1, padding: '3px 6px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#e0e0e0', fontSize: '11px', outline: 'none' }}
+            />
+            <button onClick={createGroup} disabled={!newGroupName.trim() || selectedIds.size === 0}
+              style={{ ...smallBtnStyle, opacity: (!newGroupName.trim() || selectedIds.size === 0) ? 0.4 : 1 }}>+</button>
+          </div>
+          {Object.keys(groups).length === 0 && (
+            <div style={{ fontSize: '10px', color: '#555', fontStyle: 'italic' }}>选择球后创建分组</div>
+          )}
+          {Object.entries(groups).map(([name, ids]) => (
+            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
+              <span
+                onClick={() => selectGroup(name)}
+                style={{
+                  padding: '2px 8px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
+                  background: activeGroup === name ? 'rgba(68,136,255,0.2)' : 'rgba(255,255,255,0.06)',
+                  border: `1px solid ${activeGroup === name ? '#4488ff' : 'rgba(255,255,255,0.12)'}`,
+                  color: activeGroup === name ? '#8ab4f8' : '#aaa',
+                }}
+              >
+                {name} <span style={{ opacity: 0.5 }}>({ids.size})</span>
+              </span>
+              {selectedIds.size > 0 && <>
+                <button onClick={() => addToGroup(name)} style={chipBtn} title="添加选中">+</button>
+                <button onClick={() => removeFromGroup(name)} style={chipBtn} title="移除选中">−</button>
+              </>}
+              <button onClick={() => deleteGroup(name)} style={{ ...chipBtn, color: '#ff6b6b' }} title="删除组">✕</button>
+            </div>
+          ))}
+        </div>
+
+        {/* ── 批量修改 ── */}
+        {effIds.size > 1 && (
+          <div style={secStyle}>
+            <div style={lbl}>批量修改 ({effIds.size})</div>
+            <div style={{ fontSize: '10px', color: '#666', marginBottom: '4px' }}>颜色</div>
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '8px' }}>
+              {[0xff4444, 0x4444ff, 0x44ff44, 0xffdd00, 0xff44ff, 0x44ffff, 0xff8800, 0x8844ff].map(c => (
+                <button key={c} onClick={() => batchSet('color', c)} style={{
+                  width: '22px', height: '22px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer',
+                  background: `#${c.toString(16).padStart(6, '0')}`,
+                }} />
+              ))}
+              <input type="color" onChange={e => batchSet('color', parseInt(e.target.value.slice(1), 16))}
+                style={{ width: '22px', height: '22px', padding: 0, border: 'none', borderRadius: '4px', cursor: 'pointer' }} />
+            </div>
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              <button onClick={() => batchSet('vel', [0, 0, 0])} style={smallBtnStyle}>清零速度</button>
+              <button onClick={() => batchSet('omega', [0, 0, 0])} style={smallBtnStyle}>清零角速度</button>
+              <button onClick={() => {
+                const ids = getEffectiveIds();
+                needsSyncRef.current = true;
+                setMagnets(prev => prev.map(m => ids.has(m.id) ? { ...m, fixed: !m.fixed } : m));
+              }} style={smallBtnStyle}>切换固定</button>
+            </div>
+            <div style={{ fontSize: '10px', color: '#666', marginTop: '6px', marginBottom: '4px' }}>磁矩方向</div>
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              {[['+X', [1, 0, 0]], ['−X', [-1, 0, 0]], ['+Y', [0, 1, 0]], ['−Y', [0, -1, 0]], ['+Z', [0, 0, 1]], ['−Z', [0, 0, -1]]].map(([label, val]) => (
+                /** @ts-ignore */
+                <button key={label} onClick={() => {
+                  const ids = getEffectiveIds();
+                  pushUndo(magnets); needsSyncRef.current = true;
+                  const next = magnets.map(m => {
+                    if (!ids.has(m.id)) return m;
+                    const mag = Math.sqrt(m.moment[0] ** 2 + m.moment[1] ** 2 + m.moment[2] ** 2);
+                    /** @ts-ignore */
+                    return { ...m, moment: val.map(v => v * mag) };
+                  });
+                  pushUndo(next); histIdxRef.current = -1; setMagnets(next);
+                }} style={smallBtnStyle}>{label}</button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 单选详细面板 */}
         {selectedId !== null && (
           <SelectedMagnetPanel
             selectedId={selectedId}
@@ -468,13 +870,22 @@ export default function MagnetSimulator() {
       <div
         ref={containerRef}
         onClick={handleClick}
-        style={{
-          flex: 1,
-          minWidth: '400px',
-          minHeight: '400px',
-          cursor: 'pointer'
-        }}
-      />
+        style={{ flex: 1, minWidth: '400px', minHeight: '400px', cursor: 'pointer', position: 'relative' }}
+      >
+        {/* 隐藏的 textarea 捕获键盘事件，避免浏览器滚动条拦截方向键 */}
+        <textarea
+          ref={keyTrapRef}
+          onKeyDown={handleKeyDown}
+          style={{
+            position: 'absolute', left: 0, top: 0,
+            width: '1px', height: '1px', opacity: 0,
+            padding: 0, border: 'none', outline: 'none',
+            resize: 'none', overflow: 'hidden',
+            pointerEvents: 'none',
+          }}
+          tabIndex={-1}
+        />
+      </div>
     </div>
   );
 }
