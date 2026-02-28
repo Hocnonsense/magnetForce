@@ -53,9 +53,9 @@ export function EditRow({ field, label, color, editable, draft, setDraft, onComm
 
 export function SimSection({
   isSimulating, simSpeed, stepDeltaTimeRef, totalSimTime,
-  rotateMoments, useGravity, magnets, selectedId, refYId, setRefYId,
+  useGravity, magnets, selectedId, refYId, setRefYId,
   onToggle, onResetVel, onPerturb, onReframe,
-  onSimSpeedChange, onRotateMomentsChange, onGravityChange,
+  onSimSpeedChange, onGravityChange,
 }) {
   return (
     <div style={{
@@ -113,7 +113,6 @@ export function SimSection({
         />
       </div>
 
-      <CheckboxRow label="允许磁矩旋转" checked={rotateMoments} onChange={onRotateMomentsChange} />
       <CheckboxRow label="重力 (y 方向)" checked={useGravity} onChange={onGravityChange} />
     </div>
   );

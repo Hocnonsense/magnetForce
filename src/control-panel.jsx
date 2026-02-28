@@ -8,7 +8,9 @@ import { assertVec3 } from './utils/three';
 import { useUndoHistory } from './hooks/useUndoHistory';
 import { usePhysicsLoop } from './hooks/usePhysicsLoop';
 import { SimSection, SelectedMagnetPanel } from './components/magnet-panel-components';
-import { smallBtnStyle, presetBtnStyle } from './styles';
+import {
+  smallBtnStyle, presetBtnStyle, secStyle, lbl, chipBtn
+} from './styles';
 
 // Simulation constants
 const VISUAL_SCALE = 100;
@@ -65,6 +67,11 @@ export default function MagnetSimulator() {
   const [groups, setGroups] = useState({});
   const [activeGroup, setActiveGroup] = useState(null);
   const [newGroupName, setNewGroupName] = useState('');
+
+  // ── 自定义预设（从分组保存）─────────────────────────────────────────────
+  // { [name]: { magnets: Array<{pos,vel,moment,color,...}> } }
+  // 球坐标以质心为原点存储（相对坐标）
+  const [customPresets, setCustomPresets] = useState({});
 
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
@@ -623,19 +630,32 @@ export default function MagnetSimulator() {
   };
 
   // ── 分组操作 ──────────────────────────────────────────────────────────────
-  const createGroup = useCallback(() => {
-    if (selectedIds.size === 0) return;
+  /**
+   * 如果不提供默认名称, 则使用 "#1", "#2" 等格式生成唯一名称
+   * 若默认名称存在, 则在其基础上生成 "{NAME}-1", "{NAME}-2" 等格式的唯一名称
+   */
+  const getNewGroupName = (groups, base = "") => {
+    let name = base.trim();
+    let prefix = `${base.trim()}-`;
     let idx = 1;
-    let name = newGroupName.trim() || `#${idx}`;
+    if (base === "") {
+      prefix = "#";
+      name = `#${idx}`
+    }
     for (; ; idx++) {
       if (!groups[name]) break;
-      name = `#${idx}`;
+      name = `${prefix}${idx}`;
     }
+    return name;
+  }
+  const createGroup = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    const name = getNewGroupName(groups, newGroupName.trim() || "");
     setGroups(prev => ({ ...prev, [name]: new Set(selectedIds) }));
-    setNewGroupName('');
+    setNewGroupName(name);
     setActiveGroup(name);
     setTimeout(() => { if (keyTrapRef.current) keyTrapRef.current.focus(); }, 0);
-  }, [selectedIds]);
+  }, [selectedIds, groups, newGroupName]);
   const deleteGroup = (gName) => {
     setGroups(prev => { const next = { ...prev }; delete next[gName]; return next; });
     if (activeGroup === gName) setActiveGroup(null);
@@ -703,6 +723,89 @@ export default function MagnetSimulator() {
     return () => window.removeEventListener('keydown', handler, true);
   }, [createGroup, deleteGroup, activeGroup]);
 
+  // ── 保存分组为预设 & 拖放添加 ──────────────────────────────────────────
+  /** 将激活分组保存为自定义预设（球坐标相对质心） */
+  const saveGroupAsPreset = useCallback(() => {
+    if (!activeGroup || !groups[activeGroup]) return;
+    const ids = groups[activeGroup];
+    const groupMags = magnets.filter(m => ids.has(m.id));
+    if (groupMags.length === 0) return;
+    const center = getMagnetsCenter(groupMags);
+    const relativeMags = groupMags.map(m => ({
+      pos: [m.pos[0] - center.x, m.pos[1] - center.y, m.pos[2] - center.z],
+      vel: [0, 0, 0],
+      moment: [...m.moment],
+      color: m.color,
+      fixed: m.fixed ?? false,
+    }));
+    setCustomPresets(prev => ({ ...prev, [activeGroup]: { magnets: relativeMags } }));
+  }, [activeGroup, groups, magnets]);
+
+  /** 屏幕坐标 → 物理坐标（投射到过场景中心且垂直于视线的平面） */
+  const screenToPhysics = useCallback((clientX, clientY) => {
+    const container = containerRef.current;
+    const camera = cameraRef.current;
+    if (!container || !camera) return [0, 0, 0];
+    const rect = container.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(ndc, camera);
+    // 投射到 z=0 平面（视觉坐标），若平行则用固定距离
+    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    const hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(plane, hit)) {
+      // 平行时用相机前方固定距离
+      raycaster.ray.at(10, hit);
+    }
+    return [hit.x / VISUAL_SCALE, hit.y / VISUAL_SCALE, hit.z / VISUAL_SCALE];
+  }, []);
+
+  /** 在指定物理坐标处添加预设球组，返回新球的 id 集合 */
+  const addPresetAtPosition = useCallback((presetName, physPos) => {
+    const preset = customPresets[presetName];
+    if (!preset) return;
+    needsSyncRef.current = true;
+    const newIds = new Set();
+    setMagnets(prev => {
+      const newMags = [...prev];
+      for (const tmpl of preset.magnets) {
+        const mag = createMagnet({
+          pos: [tmpl.pos[0] + physPos[0], tmpl.pos[1] + physPos[1], tmpl.pos[2] + physPos[2]],
+          vel: tmpl.vel,
+          moment: tmpl.moment,
+          color: tmpl.color,
+          fixed: tmpl.fixed,
+        });
+        newIds.add(mag.id);
+        newMags.push(mag);
+      }
+      return newMags;
+    });
+    // 创建分组
+    const groupName = getNewGroupName(groups, presetName);
+    setGroups(prev => ({ ...prev, [groupName]: newIds }));
+    setSelectedIds(newIds);
+    setActiveGroup(groupName);
+    setTotalSimTime(0);
+  }, [customPresets, groups]);
+
+  /** 处理拖放到 3D 区域 */
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    const presetName = e.dataTransfer.getData('text/x-preset-name');
+    if (!presetName || !customPresets[presetName]) return;
+    const physPos = screenToPhysics(e.clientX, e.clientY);
+    addPresetAtPosition(presetName, physPos);
+  }, [customPresets, screenToPhysics, addPresetAtPosition]);
+
   // ── 批量修改 ──────────────────────────────────────────────────────────────
   const batchSet = (field, value) => {
     const ids = getIdsInAffectedGroup();
@@ -713,11 +816,6 @@ export default function MagnetSimulator() {
     pushUndo(next); histIdxRef.current = -1;
     setMagnets(next);
   };
-
-  // ── 样式 ──────────────────────────────────────────────────────────────────
-  const secStyle = { padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' };
-  const lbl = { fontSize: '11px', color: '#888', marginBottom: '6px' };
-  const chipBtn = { ...smallBtnStyle, padding: '2px', fontSize: '8px', lineHeight: '1' };
 
   // ── 渲染 ──────────────────────────────────────────────────────────────────
   if (!ready) return (
@@ -742,14 +840,13 @@ export default function MagnetSimulator() {
         <SimSection
           isSimulating={isSimulating} simSpeed={simSpeed}
           stepDeltaTimeRef={stepDeltaTimeRef} totalSimTime={totalSimTime}
-          rotateMoments={rotateMoments} useGravity={useGravity}
+          useGravity={useGravity}
           magnets={magnets} selectedId={selectedId} refYId={refYId} setRefYId={setRefYId}
           onToggle={toggleSimulation}
           onResetVel={() => { needsSyncRef.current = true; setMagnets(prev => prev.map(m => ({ ...m, vel: [0, 0, 0], omega: [0, 0, 0] }))); }}
           onPerturb={() => { needsSyncRef.current = true; setMagnets(prev => prev.map(m => modifyMagnet(m, { pos: assertVec3(m.pos.map(p => p + (Math.random() - 0.5) * 0.3 * MAGNET_RADIUS)) }))); }}
           onReframe={reframeCoordinates}
           onSimSpeedChange={setSimSpeed}
-          onRotateMomentsChange={setRotateMoments}
           onGravityChange={setUseGravity}
         />
 
@@ -773,6 +870,50 @@ export default function MagnetSimulator() {
               </button>
             ))}
           </div>
+          {/* 自定义预设（从分组保存，可拖放到 3D 视图） */}
+          {Object.keys(customPresets).length > 0 && (
+            <>
+              <div style={{ fontSize: '10px', color: '#666', marginTop: '8px', marginBottom: '4px' }}>自定义预设（拖放到视图中添加）</div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {Object.entries(customPresets).map(([name, p]) => (
+                  <span
+                    key={name}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/x-preset-name', name);
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    style={{
+                      ...presetBtnStyle,
+                      cursor: 'grab',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    {name} <span style={{ opacity: 0.5 }}>({p.magnets.length})</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCustomPresets(prev => { const next = { ...prev }; delete next[name]; return next; });
+                      }}
+                      style={{ ...chipBtn, color: '#ff6b6b', cursor: 'pointer' }}
+                      title="删除预设"
+                    >✕</button>
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+          {/* 保存当前分组为预设 */}
+          {activeGroup && groups[activeGroup] && groups[activeGroup].size > 0 && (
+            <button
+              onClick={saveGroupAsPreset}
+              style={{ ...smallBtnStyle, marginTop: '6px', width: '100%', background: '#1a2a3a', borderColor: '#2a4a6a' }}
+            >
+              💾 保存「{activeGroup}」为预设
+            </button>
+          )}
         </div>
 
         {/* Selected & Grouping Magnet Controls */}
@@ -948,6 +1089,8 @@ export default function MagnetSimulator() {
         ref={containerRef}
         onClick={handleClick}
         onMouseDown={handleMouseDown}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         style={{ flex: 1, minWidth: '400px', minHeight: '400px', cursor: 'pointer', position: 'relative' }}
       >
         {/* 隐藏的 textarea 捕获键盘事件，避免浏览器滚动条拦截方向键 */}
