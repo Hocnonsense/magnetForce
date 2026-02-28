@@ -53,7 +53,7 @@ export default function MagnetSimulator() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [simSpeed, setSimSpeed] = useState(0.00004);
   const [rotateMoments, setRotateMoments] = useState(true);
-  const [useGravity, setUseGravity] = useState(true);
+  const [useGravity, setUseGravity] = useState(false);
   const [showVectors, setShowVectors] = useState(true);
   const [totalSimTime, setTotalSimTime] = useState(0);
   const [editDraft, setEditDraft] = useState(null);
@@ -664,11 +664,15 @@ export default function MagnetSimulator() {
   };
 
   // ── Ctrl+G / Ctrl+Shift+G 全局快捷键 ────────────────────────────────────
+  // 使用捕获阶段（capture: true）+ stopImmediatePropagation 以覆盖 Edge/Chrome 的 Ctrl+G 查找行为
   useEffect(() => {
     const handler = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       if ((e.key === 'g' || e.key === 'G') && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        console.log(`e.target.tagName=${e.target.tagName}, shiftKey=${e.shiftKey}`);
+        if (e.target.tagName === 'INPUT' && e.target !== keyTrapRef.current) return;
         if (e.shiftKey) {
           activeGroup && deleteGroup(activeGroup)
         } else {
@@ -676,9 +680,9 @@ export default function MagnetSimulator() {
         }
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [createGroup, deleteGroup]);
+    window.addEventListener('keydown', handler, true); // capture phase
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [createGroup, deleteGroup, activeGroup]);
 
   // ── 批量修改 ──────────────────────────────────────────────────────────────
   const batchSet = (field, value) => {
