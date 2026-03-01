@@ -12,28 +12,12 @@ import { SimSection, SelectedMagnetPanel } from './components/MagnetPanelCompone
 import { PresetPanel } from './components/PresetPanel';
 import { GroupPanel } from './components/GroupPanel';
 import { smallBtnStyle, secStyle, lbl } from './styles';
+import { useKeyboardNav } from './hooks/useKeyboardNav';
 
 // Simulation constants
 const VISUAL_SCALE = 100;
 /** 白圈屏幕像素宽度（固定） */
 const RING_PX = 3;
-
-/**
- * 根据当前相机距离算白圈在物理坐标下的宽度
- * @param {THREE.Vector3} refPoint 参考点（默认原点）
- * @param {THREE.PerspectiveCamera} camera
- * @param {THREE.WebGLRenderer} renderer
- */
-function getRingWorldWidth(refPoint, camera, renderer) {
-  if (!camera || !renderer) return 0;
-  const target = refPoint ?? new THREE.Vector3(0, 0, 0);
-  const dist = camera.position.distanceTo(target);
-  const fov = camera.fov * Math.PI / 180;
-  const screenH = renderer.domElement.height;
-  const pixelPerUnit = screenH / (2 * dist * Math.tan(fov / 2));
-  // 视觉坐标宽度 → 物理坐标宽度
-  return pixelPerUnit
-};
 
 function getMagnetsCenter(magnets) {
   const c = new THREE.Vector3(0, 0, 0);
@@ -134,50 +118,6 @@ export default function MagnetSimulator() {
     needsSyncRef, selectedIdsRef,
     setMagnets, setEditDraft, setTotalSimTime, fmt,
   );
-
-  // ── 工具：白圈世界宽度 & 碰撞检测 ────────────────────────────────────────
-  /**
-   * 根据当前相机距离算白圈在物理坐标下的宽度
-   * @param {THREE.Vector3} [refPoint] 参考点（默认原点）
-   * @returns {number} 物理坐标步长
-   */
-
-  /** 检查 movedIds 平移 delta 后是否与其他球碰撞 */
-  const canMove = useCallback((mags, movedIds, delta) => {
-    const minD = MAGNET_RADIUS * 2 * 0.999;
-    for (const m of mags) {
-      if (!movedIds.has(m.id)) continue;
-      const np = m.pos.map((p, i) => p + delta[i]);
-      for (const o of mags) {
-        if (o.id === m.id || movedIds.has(o.id)) continue;
-        const dx = np[0] - o.pos[0], dy = np[1] - o.pos[1], dz = np[2] - o.pos[2];
-        if (Math.sqrt(dx * dx + dy * dy + dz * dz) < minD) return false;
-      }
-    }
-    return true;
-  }, [MAGNET_RADIUS]);
-
-  /** 检查 ids 绕 center 旋转 angle（弧度）后是否碰撞 */
-  const canRotate = useCallback((mags, ids, center, axis, angle) => {
-    const minD = MAGNET_RADIUS * 2 * 0.999;
-    const q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
-    const newPos = new Map();
-    for (const m of mags) {
-      if (ids.has(m.id)) {
-        const v = new THREE.Vector3(...m.pos).sub(center);
-        v.applyQuaternion(q).add(center);
-        newPos.set(m.id, [v.x, v.y, v.z]);
-      }
-    }
-    for (const [id, np] of newPos) {
-      for (const o of mags) {
-        if (o.id === id || ids.has(o.id)) continue;
-        const dx = np[0] - o.pos[0], dy = np[1] - o.pos[1], dz = np[2] - o.pos[2];
-        if (Math.sqrt(dx * dx + dy * dy + dz * dz) < minD) return false;
-      }
-    }
-    return true;
-  }, [MAGNET_RADIUS]);
 
   // ── Three.js 初始化 ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -436,66 +376,10 @@ export default function MagnetSimulator() {
 
   // ── 键盘输入捕获 ──────────────────────────────────────────────────────────
   // 点击 3D 区域时不再自动聚焦 keyTrap，仅选择分组时聚焦
-  const handleKeyDown = useCallback((e) => {
-    // 模拟时不允许操作
-    if (stateRef.current.isSimulating) return;
-    const effIds = getIdsInAffectedGroup(); if (effIds.size === 0) return;
-    /** @type {THREE.PerspectiveCamera} */
-    const camera = cameraRef.current; if (!camera) return;
-    // 相机空间方向
-    const forward = new THREE.Vector3(); camera.getWorldDirection(forward);
-    const right = new THREE.Vector3(); right.crossVectors(forward, camera.up).normalize();
-    const up = new THREE.Vector3(); up.crossVectors(right, forward).normalize();
-    /** 选中球的质心（物理坐标） */
-    const center = getMagnetsCenter(
-      stateRef.current.magnets.filter(m => effIds.has(m.id))
-    );
-    /** 白圈世界宽度（物理坐标） */
-    const ringW = RING_PX / VISUAL_SCALE / getRingWorldWidth(center, camera, rendererRef.current);
-    let delta = null, rotAxis = null;
-    switch (e.key) {
-      // ── 方向键：平移 ──
-      case 'ArrowRight': delta = [right.x * ringW, right.y * ringW, right.z * ringW]; break;
-      case 'ArrowLeft': delta = [-right.x * ringW, -right.y * ringW, -right.z * ringW]; break;
-      case 'ArrowUp': delta = [up.x * ringW, up.y * ringW, up.z * ringW]; break;
-      case 'ArrowDown': delta = [-up.x * ringW, -up.y * ringW, -up.z * ringW]; break;
-      case 'PageUp': rotAxis = right.clone().negate(); break;
-      case 'PageDown': rotAxis = right.clone(); break;
-      case 'Home': rotAxis = up.clone().negate(); break;
-      case 'End': rotAxis = up.clone(); break;
-      case 'Tab':
-        e.preventDefault();
-        rotAxis = e.shiftKey ? forward.clone().negate() : forward.clone();
-        break;
-    }
-    if (delta) {
-      e.preventDefault();
-      setMagnets(prev => {
-        if (!canMove(prev, effIds, delta)) return prev;
-        needsSyncRef.current = true;
-        return prev.map(m => {
-          if (!effIds.has(m.id)) return m;
-          return { ...m, pos: m.pos.map((p, i) => p + delta[i]) };
-        });
-      });
-      return;
-    } else if (rotAxis) {
-      e.preventDefault();
-      const angle = Math.atan2(ringW, MAGNET_RADIUS);
-      const axis = rotAxis;
-      const q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
-      setMagnets(prev => {
-        if (!canRotate(prev, effIds, center, axis, angle)) return prev;
-        needsSyncRef.current = true;
-        return prev.map(m => {
-          if (!effIds.has(m.id)) return m;
-          const v = new THREE.Vector3(...m.pos).sub(center).applyQuaternion(q).add(center);
-          const mom = new THREE.Vector3(...m.moment).applyQuaternion(q);
-          return { ...m, pos: [v.x, v.y, v.z], moment: [mom.x, mom.y, mom.z] };
-        });
-      });
-    }
-  }, [getIdsInAffectedGroup, canMove, canRotate, MAGNET_RADIUS]);
+  const { handleKeyDown } = useKeyboardNav(
+    { stateRef, cameraRef, rendererRef, setMagnets, needsSyncRef, getIdsInAffectedGroup },
+    RING_PX, VISUAL_SCALE, MAGNET_RADIUS
+  )
 
   // ── 点击选择 ──────────────────────────────────────────────────────────────
   const mouseDownPosRef = useRef(null);

@@ -3,7 +3,7 @@
  */
 
 export function isVec3(v) {
-    return Array.isArray(v) && v.length === 3 && v.every(x => typeof x === 'number' && isFinite(x));
+  return Array.isArray(v) && v.length === 3 && v.every(x => typeof x === 'number' && isFinite(x));
 }
 
 /**
@@ -14,11 +14,11 @@ export function isVec3(v) {
  * @throws {TypeError}
  */
 export function assertVec3(v) {
-    if (!isVec3(v)) {
-        throw new TypeError(`Vec3: expected number[3], got ${JSON.stringify(v)}`);
-    }
-    // @ts-ignore
-    return v;
+  if (!isVec3(v)) {
+    throw new TypeError(`Vec3: expected number[3], got ${JSON.stringify(v)}`);
+  }
+  // @ts-ignore
+  return v;
 }
 
 
@@ -28,7 +28,7 @@ export function assertVec3(v) {
  * @return {Vec3}
  */
 export function Add(v1, v2) {
-    return [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]];
+  return [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]];
 }
 
 /** (x1 + x2, y1 + y2, z1 + z2), inplace modify v1
@@ -37,10 +37,10 @@ export function Add(v1, v2) {
  * @return {Vec3} === v1
  */
 export function add(v1, v2) {
-    v1[0] += v2[0];
-    v1[1] += v2[1];
-    v1[2] += v2[2];
-    return v1;
+  v1[0] += v2[0];
+  v1[1] += v2[1];
+  v1[2] += v2[2];
+  return v1;
 }
 
 /** (x2 - x1, y2 - y1, z2 - z1)
@@ -49,7 +49,7 @@ export function add(v1, v2) {
  * @return {Vec3}
  */
 export function DistanceTo(v1, v2) {
-    return [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]];
+  return [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]];
 }
 
 /** (x2 - x1, y2 - y1, z2 - z1), inplace modify v1
@@ -58,10 +58,10 @@ export function DistanceTo(v1, v2) {
  * @return {Vec3} === v1
  */
 export function distanceTo(v1, v2) {
-    v1[0] = v2[0] - v1[0];
-    v1[1] = v2[1] - v1[1];
-    v1[2] = v2[2] - v1[2];
-    return v1;
+  v1[0] = v2[0] - v1[0];
+  v1[1] = v2[1] - v1[1];
+  v1[2] = v2[2] - v1[2];
+  return v1;
 }
 
 /** (x^2 + y^2 + z^2)^(1/2)
@@ -69,7 +69,7 @@ export function distanceTo(v1, v2) {
  * @return {number}
  */
 export function Length(v) {
-    return Math.sqrt(Dot(v, v));
+  return Math.sqrt(Dot(v, v));
 }
 
 /** (x * scalar, y * scalar, z * scalar)
@@ -78,8 +78,8 @@ export function Length(v) {
  * @return {Vec3}
  */
 export function MultiplyScalar(v, scalar) {
-    // @ts-ignore
-    return v.map(a => a * scalar);
+  // @ts-ignore
+  return v.map(a => a * scalar);
 }
 
 /** (x2 * s, y2 * s, z2 * s), inplace modify v1
@@ -88,10 +88,10 @@ export function MultiplyScalar(v, scalar) {
  * @return {Vec3} === v1
  */
 export function multiplyScalar(v1, scalar) {
-    v1[0] *= scalar;
-    v1[1] *= scalar;
-    v1[2] *= scalar;
-    return v1;
+  v1[0] *= scalar;
+  v1[1] *= scalar;
+  v1[2] *= scalar;
+  return v1;
 }
 
 /** (x / length, y / length, z / length)
@@ -99,8 +99,8 @@ export function multiplyScalar(v1, scalar) {
  * @return {Vec3}
  */
 export function Normalize(v) {
-    const len = Length(v);
-    return MultiplyScalar(v, 1 / len);
+  const len = Length(v);
+  return MultiplyScalar(v, 1 / len);
 }
 
 /** (x / length, y / length, z / length), inplace modify v
@@ -108,8 +108,8 @@ export function Normalize(v) {
  * @return {Vec3} === v
  */
 export function normalize(v) {
-    const len = Length(v);
-    return multiplyScalar(v, 1 / len);
+  const len = Length(v);
+  return multiplyScalar(v, 1 / len);
 }
 
 /** (x1 * x2 + y1 * y2 + z1 * z2)
@@ -118,7 +118,7 @@ export function normalize(v) {
  * @return {number}
  */
 export function Dot(v1, v2) {
-    return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+  return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
 }
 
 /** 叉乘
@@ -127,11 +127,11 @@ export function Dot(v1, v2) {
  * @return {Vec3}
 */
 export function Cross(v1, v2) {
-    return [
-        v1[1] * v2[2] - v1[2] * v2[1],
-        v1[2] * v2[0] - v1[0] * v2[2],
-        v1[0] * v2[1] - v1[1] * v2[0]
-    ];
+  return [
+    v1[1] * v2[2] - v1[2] * v2[1],
+    v1[2] * v2[0] - v1[0] * v2[2],
+    v1[0] * v2[1] - v1[1] * v2[0]
+  ];
 }
 
 /** 叉乘并相加
@@ -141,10 +141,10 @@ export function Cross(v1, v2) {
  * @return {Vec3} === out
 */
 export function crossAddTo(v1, v2, out) {
-    out[0] += v1[1] * v2[2] - v1[2] * v2[1];
-    out[1] += v1[2] * v2[0] - v1[0] * v2[2];
-    out[2] += v1[0] * v2[1] - v1[1] * v2[0];
-    return out;
+  out[0] += v1[1] * v2[2] - v1[2] * v2[1];
+  out[1] += v1[2] * v2[0] - v1[0] * v2[2];
+  out[2] += v1[0] * v2[1] - v1[1] * v2[0];
+  return out;
 }
 
 /**
@@ -155,12 +155,45 @@ export function crossAddTo(v1, v2, out) {
  * @returns {Vec3} === v，旋转后的向量（原地修改）
  */
 export function rotateAroundAxis(v, axis, angle) {
-    const cosTheta = Math.cos(angle);
-    const sinTheta = Math.sin(angle);
-    const axisDotV = Dot(axis, v);
-    const cross = Cross(axis, v);
-    v[0] = v[0] * cosTheta + cross[0] * sinTheta + axis[0] * axisDotV * (1 - cosTheta);
-    v[1] = v[1] * cosTheta + cross[1] * sinTheta + axis[1] * axisDotV * (1 - cosTheta);
-    v[2] = v[2] * cosTheta + cross[2] * sinTheta + axis[2] * axisDotV * (1 - cosTheta);
-    return v;
+  const cosTheta = Math.cos(angle);
+  const sinTheta = Math.sin(angle);
+  const axisDotV = Dot(axis, v);
+  const cross = Cross(axis, v);
+  v[0] = v[0] * cosTheta + cross[0] * sinTheta + axis[0] * axisDotV * (1 - cosTheta);
+  v[1] = v[1] * cosTheta + cross[1] * sinTheta + axis[1] * axisDotV * (1 - cosTheta);
+  v[2] = v[2] * cosTheta + cross[2] * sinTheta + axis[2] * axisDotV * (1 - cosTheta);
+  return v;
+}
+
+/**
+ * 使用四元数 q 旋转向量 v，返回旋转后的向量（原地修改）
+ * @param {Vec3} v
+ * @param {number[]} q
+ * @returns {Vec3} === v
+ */
+export function applyQuaternion(v, q) {
+  const [x, y, z] = v, [qx, qy, qz, qw] = q;
+  // calculate quat * vec
+  const ix = qw * x + qy * z - qz * y;
+  const iy = qw * y + qz * x - qx * z;
+  const iz = qw * z + qx * y - qy * x;
+  const iw = -qx * x - qy * y - qz * z;
+  // calculate result * inverse quat
+  v[0] = ix * qw + iw * -qx + iy * -qz - iz * -qy;
+  v[1] = iy * qw + iw * -qy + iz * -qx - ix * -qz;
+  v[2] = iz * qw + iw * -qz + ix * -qy - iy * -qx;
+  return v;
+}
+
+/**
+ * 计算一组坐标的中心点
+ * @param {Vec3[]} vecs
+ */
+export function getCenter(vecs) {
+  /** @type {Vec3} */
+  const c = [0, 0, 0];
+  const cnt = vecs.length;
+  if (cnt === 0) return c;
+  vecs.forEach(m => add(c, m));
+  return multiplyScalar(c, 1 / cnt);
 }
