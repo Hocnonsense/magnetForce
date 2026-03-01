@@ -1,4 +1,4 @@
-import * as Three from '../utils/three';
+import { Vector3 } from 'three';
 import { modifyMagnet } from '../data/magnet-type';
 import { WorldParams } from '../data/world-type';
 import { rotateMoments, safeMove } from './integrator';
@@ -37,8 +37,8 @@ export class MagnetPGSWorld {
   /** 计算磁力（用内部存储的位置和磁矩） */
   calcMagneticForces(magnets, radius, mMag) {
     const n = magnets.length;
-    const coforces = magnets.map(() => [0, 0, 0]);
-    const torques = magnets.map(() => [0, 0, 0]);
+    const coforces = magnets.map(() => new Vector3(0, 0, 0));
+    const torques = magnets.map(() => new Vector3(0, 0, 0));
     const forces = magnets.map(() => new Map());
 
     for (let i = 0; i < n; i++) {
@@ -46,12 +46,12 @@ export class MagnetPGSWorld {
         const ft = calculateMagnet(
           radius, mMag,
           magnets[i].moment, magnets[j].moment,
-          Three.DistanceTo(magnets[i].pos, magnets[j].pos)
+          magnets[i].pos.clone().sub(magnets[j].pos)
         )
-        Three.add(coforces[i], ft.force1);
-        Three.add(coforces[j], ft.force2);
-        Three.add(torques[i], ft.torque1);
-        Three.add(torques[j], ft.torque2);
+        coforces[i].add(ft.force1);
+        coforces[j].add(ft.force2);
+        torques[i].add(ft.torque1);
+        torques[j].add(ft.torque2);
         forces[i].set(`M#${j}`, ft.force1);
         forces[j].set(`M#${i}`, ft.force2);
       }

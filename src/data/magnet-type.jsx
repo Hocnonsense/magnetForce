@@ -1,8 +1,5 @@
-import * as Three from '../utils/three.jsx';
+import { Vector3 } from 'three';
 import { getRot } from '../utils/coordinates.jsx';
-/**
- * @typedef {Three.Vec3} Vec3
- */
 
 let _nextId = 0;
 export function resetMagnetIdCounter() {
@@ -15,36 +12,47 @@ export function resetMagnetIdCounter() {
  * **输入字段**（每步开始时必须完整）:
  * @typedef {Object} Magnet
  * @property {number}  id     - 唯一整数标识符（由 presets 分配，仿真期间不变）
- * @property {Vec3}    pos    - 位置，单位 m
- * @property {Vec3}    vel    - 线速度，单位 m/s
- * @property {Vec3}    moment - 磁矩方向向量（模 = |m|，A·m²；仿真中通常已归一化后由 BuckyBall 缩放）
- * @property {Vec3}    omega  - 角速度，单位 rad/s（用于磁矩旋转积分）
+ * @property {Vector3} pos    - 位置，单位 m
+ * @property {Vector3} vel    - 线速度，单位 m/s
+ * @property {Vector3} moment - 磁矩方向向量（模 = |m|，A·m²；仿真中通常已归一化后由 BuckyBall 缩放）
+ * @property {Vector3} omega  - 角速度，单位 rad/s（用于磁矩旋转积分）
  * @property {string}  color  - 用于渲染的颜色字符串（如 '#ff0000' 或 0xff0000）
  * @property {string}  group  - 可选的分组标签, 可能用于整体移动或旋转
  *
  * **输出字段**（由 MagnetPGSWorld.step() 写入，首帧前可能为 undefined）:
- * @property {Vec3}   [f]    - 合力（含约束修正后），单位 N
- * @property {Vec3}   [tau]  - 合力矩，单位 N·m
+ * @property {Vector3}   [f]    - 合力（含约束修正后），单位 N
+ * @property {Vector3}   [tau]  - 合力矩，单位 N·m
  * @property {boolean} [fixed]  - 是否被固定
  */
 
-const REQUIRED_VEC3 = /** @type {(keyof Magnet)[]} */ (['pos', 'vel', 'm', 'omega']);
+const REQUIRED_VEC3 = /** @type {(keyof Magnet)[]} */ (['pos', 'vel', 'moment', 'omega']);
 const OPTIONAL_VEC3 = /** @type {(keyof Magnet)[]} */ (['f', 'tau', 'fixed']);
 
 /** @returns {Magnet} */
 export function createMagnet(init = {}) {
   return {
-    id: init.id ?? _nextId++, // @ts-ignore
-    pos: init.pos ? [...init.pos] : [0, 0, 0], // @ts-ignore
-    vel: init.vel ? [...init.vel] : [0, 0, 0], // @ts-ignore
-    moment: init.moment ? [...init.moment] : [1, 0, 0], // @ts-ignore
-    omega: init.omega ? [...init.omega] : [0, 0, 0],
+    id: init.id ?? _nextId++,
+    pos: init.pos ? init.pos.clone() : new Vector3(),
+    vel: init.vel ? init.vel.clone() : new Vector3(),
+    moment: init.moment ? init.moment.clone() : new Vector3(1, 0, 0),
+    omega: init.omega ? init.omega.clone() : new Vector3(),
     color: init.color ?? '#93b5c9',
     group: init.group ?? '',
-    f: [0, 0, 0],
-    tau: [0, 0, 0],
+    f: new Vector3(),
+    tau: new Vector3(),
     fixed: init.fixed ?? false,
   };
+}
+
+export function perturbMagnet(mag, magnitude = 0.3) {
+  const randVec = new Vector3(
+    (Math.random() - 0.5) * magnitude,
+    (Math.random() - 0.5) * magnitude,
+    (Math.random() - 0.5) * magnitude
+  );
+  return modifyMagnet(mag, {
+    pos: mag.pos.clone().add(randVec),
+  });
 }
 
 /**
@@ -72,16 +80,16 @@ export function assertMagnet(mag, label = 'magnet') {
     throw new TypeError(`${label}: expected object, got ${mag === null ? 'null' : typeof mag}`);
   }
   for (const key of REQUIRED_VEC3) {
-    if (!Three.isVec3(mag[key])) {
+    if (!(mag[key] instanceof Vector3)) {
       throw new TypeError(
-        `${label}.${key}: expected number[3], got ${JSON.stringify(mag[key])}`
+        `${label}.${key}: expected Vector3, got ${JSON.stringify(mag[key])}`
       );
     }
   }
   for (const key of OPTIONAL_VEC3) {
-    if (mag[key] !== undefined && !Three.isVec3(mag[key])) {
+    if (mag[key] !== undefined && !(mag[key] instanceof Vector3)) {
       throw new TypeError(
-        `${label}.${key}: expected number[3] or undefined, got ${JSON.stringify(mag[key])}`
+        `${label}.${key}: expected Vector3 or undefined, got ${JSON.stringify(mag[key])}`
       );
     }
   }
@@ -106,12 +114,26 @@ export function assertMagnets(arr) {
 }
 
 /**
- * 将 Vec3 格式化为固定宽度字符串，方便列对齐。
- * @param {Vec3|undefined} v
+ * 将 Vector3 格式化为固定宽度字符串，方便列对齐。
+ * @param {Vector3|undefined} v
  */
-function fmtVec3(v, digits = 6) {
+function fmtVec3(v, digits = 6, scale = 1) {
   if (!v) return '(undefined)';
-  return `[${v.map(x => x.toFixed(digits).padStart(10)).join(', ')} ]`;
+  return v.toArray().map(x => (x * scale).toFixed(digits));
+}
+
+/**
+ * @param {Magnet} mag
+ */
+export function magnet2Draft(mag) {
+  const _default = new Vector3();
+  return {
+    m_pos: fmtVec3(mag.pos, 6, 1000),
+    m_vel: fmtVec3(mag.vel ?? _default, 6, 1000),
+    moment: fmtVec3(mag.moment),
+    f: fmtVec3(mag.f ?? _default),
+    tau: fmtVec3(mag.tau ?? _default),
+  }
 }
 
 /**
@@ -170,14 +192,17 @@ export function reframeCoordinates(magnets, selectedId, refYId) {
   const mag1 = magnets.find(m => m.id === selectedId);
   const mag2 = magnets.find(m => m.id === refYId);
   if (!mag1 || !mag2) return;
-  const rot = getRot(Three.normalize([...mag1.moment]), Three.DistanceTo(mag1.pos, mag2.pos));
+  const rot = getRot(
+    mag1.moment,
+    mag2.pos.clone().sub(mag1.pos)
+  );
   if (!rot) return;
   const origin = mag1.pos;
   return (magnets.map(m => modifyMagnet(m, {
-    pos: rot(Three.DistanceTo(origin, m.pos)),
-    vel: rot(m.vel ?? [0, 0, 0]),
+    pos: rot(m.pos.clone().sub(origin)),
+    vel: rot(m.vel ?? new Vector3()),
     moment: rot(m.moment),
-    f: rot(m.f ?? [0, 0, 0]),
-    tau: rot(m.tau ?? [0, 0, 0]),
+    f: rot(m.f ?? new Vector3()),
+    tau: rot(m.tau ?? new Vector3()),
   })));
 };

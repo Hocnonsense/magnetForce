@@ -215,8 +215,7 @@ export function useThreeScene(
     const groupIds = getIdsInAffectedGroup();
 
     magnets.forEach((mag, idx) => {
-      const scaled = mag.pos.map(p => p * VISUAL_SCALE);
-      const origin = new THREE.Vector3(scaled[0], scaled[1], scaled[2]);
+      const origin = mag.pos.clone().multiplyScalar(VISUAL_SCALE);
       // Sphere position & highlight
       const mesh = meshes[idx];
       if (mesh) {
@@ -246,7 +245,7 @@ export function useThreeScene(
       /** @type {THREE.ArrowHelper} Moment arrow */
       const arrow = arrows[idx];
       if (arrow) {
-        const dir = new THREE.Vector3(...mag.moment).normalize();
+        const dir = mag.moment.clone().normalize();
         arrow.position.copy(origin);
         arrow.setDirection(dir);
         arrow.setLength(VISUAL_RADIUS * 3.6, VISUAL_RADIUS * 0.5, VISUAL_RADIUS * 0.3);
@@ -254,10 +253,10 @@ export function useThreeScene(
       /** @type {THREE.ArrowHelper} Force arrow */
       const fArrow = forceArrows[idx];
       if (fArrow) {
-        const fMag = mag.f ? new THREE.Vector3(...mag.f).length() : 0;
+        const fMag = mag.f ? mag.f.length() : 0;
         if (fMag > 1e-25) {
           fArrow.visible = true;
-          const fDir = new THREE.Vector3(...mag.f).normalize();
+          const fDir = mag.f.clone().normalize();
           // 基于力的大小，范围 0.5R ~ 6R
           const fLen = VISUAL_RADIUS * Math.min(6, Math.max(0.5, Math.log10(fMag + 1e-10) + 10));
           fArrow.position.copy(origin);

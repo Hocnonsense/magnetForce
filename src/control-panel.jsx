@@ -1,10 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { reframeCoordinates as _reframeCoordinates, createMagnet, modifyMagnet, resetMagnetIdCounter } from './data/magnet-type';
+import { reframeCoordinates as _reframeCoordinates, createMagnet, magnet2Draft, resetMagnetIdCounter, perturbMagnet } from './data/magnet-type';
 import { exportJson, listPresets, loadPreset } from './data/presets';
 import initMagnetWorld from './physics/world';
-import { assertVec3 } from './utils/three';
 import { useUndoHistory } from './hooks/useUndoHistory';
 import { usePhysicsLoop } from './hooks/usePhysicsLoop';
 import { useGrouping, getNewGroupName } from './hooks/useGrouping';
@@ -24,9 +22,7 @@ function getMagnetsCenter(magnets) {
   const c = new THREE.Vector3(0, 0, 0);
   const cnt = magnets.length;
   if (cnt === 0) return c;
-  magnets.forEach(m => {
-    c.add(new THREE.Vector3(m.pos[0], m.pos[1], m.pos[2]));
-  });
+  magnets.forEach(m => c.add(m.pos));
   c.divideScalar(cnt);
   return c;
 }
@@ -76,14 +72,6 @@ export default function MagnetSimulator() {
   useEffect(initMagnetWorld(magnetWorldRef, setReady, MAGNET_RADIUS), []);
 
   const fmt = v => v?.toFixed(6) ?? 'N/A';
-  const magnetToDraft = (mag) => ({
-    m_pos: mag.pos.map(p => p * 1000).map(fmt),
-    m_vel: mag.vel.map(v => v * 1000).map(fmt),
-    moment: mag.moment.map(fmt),
-    f: (mag.f ?? [0, 0, 0]).map(fmt),
-    tau: (mag.tau ?? [0, 0, 0]).map(fmt),
-  });
-
   useEffect(() => {
     listPresets()
       .then(names => { setPresets(names); return loadPreset(names[0], MAGNET_RADIUS); })
@@ -97,13 +85,12 @@ export default function MagnetSimulator() {
   // ── 撤销历史 ──────────────────────────────────────────────────────────────
   const { push: pushUndo, reset: resetUndo, histIdxRef } = useUndoHistory({
     getMagnets: () => stateRef.current.magnets,
-    setMagnets,
     selectedId,
     onApplySnap: (snap) => {
       needsSyncRef.current = true;
       setMagnets(snap);
       const mag = snap.find(m => m.id === selectedId);
-      if (mag) setEditDraft(magnetToDraft(mag));
+      if (mag) setEditDraft(magnet2Draft(mag));
     },
   });
 
@@ -124,7 +111,7 @@ export default function MagnetSimulator() {
   useEffect(() => {
     if (selectedId === null) { setEditDraft(null); return; }
     const mag = magnets.find(m => m.id === selectedId);
-    setEditDraft(mag ? magnetToDraft(mag) : null);
+    setEditDraft(mag ? magnet2Draft(mag) : null);
   }, [selectedId]);
 
   // ── 键盘输入捕获 ──────────────────────────────────────────────────────────
@@ -176,7 +163,7 @@ export default function MagnetSimulator() {
   const addMagnet = () => {
     needsSyncRef.current = true;
     setMagnets(prev => [...prev, createMagnet({
-      pos: [(Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02, 0],
+      pos: new THREE.Vector3((Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02, 0),
       color: Math.random() > 0.5 ? 0x4444ff : 0xff4444
     })]);
     setTotalSimTime(0);
@@ -213,8 +200,8 @@ export default function MagnetSimulator() {
     pushUndo(magnets);
     const newMagnets = magnets.map(mag => {
       if (mag.id !== selectedId) return mag;
-      const updated = [...(mag[magField] ?? [0, 0, 0])]; updated[index] = num * scale;
-      return { ...mag, [magField]: updated };
+      const updated = [...(mag[magField].toArray ? mag[magField].toArray() : mag[magField] ?? [0, 0, 0])]; updated[index] = num * scale;
+      return { ...mag, [magField]: new THREE.Vector3(...updated) };
     });
     pushUndo(newMagnets); histIdxRef.current = -1;
     needsSyncRef.current = true; setMagnets(newMagnets);
@@ -222,7 +209,7 @@ export default function MagnetSimulator() {
   };
 
   const exportMagnets = useCallback((mode) => {
-    const json = exportJson(magnets.map(m => ({ ...m, pos: m.pos.map(p => p / MAGNET_RADIUS) })), 'exported', 'radius');
+    const json = exportJson(magnets.map(m => ({ ...m, pos: m.pos.clone().multiplyScalar(1 / MAGNET_RADIUS) })), 'exported', 'radius');
     if (mode === 'copy') {
       navigator.clipboard.writeText(json).then(() => alert('已复制到剪贴板')).catch(() => alert('复制失败'));
     } else {
@@ -255,8 +242,8 @@ export default function MagnetSimulator() {
     if (groupMags.length === 0) return;
     const center = getMagnetsCenter(groupMags);
     const relativeMags = groupMags.map(m => ({
-      pos: [m.pos[0] - center.x, m.pos[1] - center.y, m.pos[2] - center.z],
-      moment: [...m.moment],
+      pos: m.pos.clone().sub(center),
+      moment: m.moment.clone(),
       color: m.color
     }));
     setCustomPresets(prev => ({ ...prev, [activeGroup]: { magnets: relativeMags } }));
@@ -294,9 +281,9 @@ export default function MagnetSimulator() {
       const newMags = [...prev];
       for (const tmpl of preset.magnets) {
         const mag = createMagnet({
-          pos: [tmpl.pos[0] + physPos[0], tmpl.pos[1] + physPos[1], tmpl.pos[2] + physPos[2]],
-          vel: tmpl.vel,
-          moment: tmpl.moment,
+          pos: tmpl.pos.clone().add(physPos),
+          vel: tmpl.vel.clone(),
+          moment: tmpl.moment.clone(),
           color: tmpl.color,
           fixed: tmpl.fixed,
         });
@@ -364,8 +351,8 @@ export default function MagnetSimulator() {
           useGravity={useGravity}
           magnets={magnets} selectedId={selectedId} refYId={refYId} setRefYId={setRefYId}
           onToggle={toggleSimulation}
-          onResetVel={() => { needsSyncRef.current = true; setMagnets(prev => prev.map(m => ({ ...m, vel: [0, 0, 0], omega: [0, 0, 0] }))); }}
-          onPerturb={() => { needsSyncRef.current = true; setMagnets(prev => prev.map(m => modifyMagnet(m, { pos: assertVec3(m.pos.map(p => p + (Math.random() - 0.5) * 0.3 * MAGNET_RADIUS)) }))); }}
+          onResetVel={() => { needsSyncRef.current = true; setMagnets(prev => prev.map(m => ({ ...m, vel: new THREE.Vector3(), omega: new THREE.Vector3() }))); }}
+          onPerturb={() => { needsSyncRef.current = true; setMagnets(prev => prev.map(m => perturbMagnet(m, 0.2 * MAGNET_RADIUS))); }}
           onReframe={reframeCoordinates}
           onSimSpeedChange={setSimSpeed}
           onGravityChange={setUseGravity}
@@ -412,8 +399,8 @@ export default function MagnetSimulator() {
                 style={{ width: '22px', height: '22px', padding: 0, border: 'none', borderRadius: '4px', cursor: 'pointer' }} />
             </div>
             <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-              <button onClick={() => batchSet('vel', [0, 0, 0])} style={smallBtnStyle}>清零速度</button>
-              <button onClick={() => batchSet('omega', [0, 0, 0])} style={smallBtnStyle}>清零角速度</button>
+              <button onClick={() => batchSet('vel', new THREE.Vector3())} style={smallBtnStyle}>清零速度</button>
+              <button onClick={() => batchSet('omega', new THREE.Vector3())} style={smallBtnStyle}>清零角速度</button>
               <button onClick={() => {
                 const ids = getIdsInAffectedGroup();
                 needsSyncRef.current = true;
@@ -431,7 +418,7 @@ export default function MagnetSimulator() {
                     if (!ids.has(m.id)) return m;
                     const mag = Math.sqrt(m.moment[0] ** 2 + m.moment[1] ** 2 + m.moment[2] ** 2);
                     /** @ts-ignore */
-                    return { ...m, moment: val.map(v => v * mag) };
+                    return { ...m, moment: new THREE.Vector3(...val).multiplyScalar(mag) };
                   });
                   pushUndo(next); histIdxRef.current = -1; setMagnets(next);
                 }} style={smallBtnStyle}>{label}</button>

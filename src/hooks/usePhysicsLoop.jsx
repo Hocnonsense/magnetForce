@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { modifyMagnet } from '../data/magnet-type';
-import { assertVec3 } from '../utils/three';
+import { modifyMagnet, magnet2Draft } from '../data/magnet-type';
+import * as THREE from 'three';
 
 /**
  * @typedef {import('../data/magnet-type').Magnet} Magnet
+ * @typedef {import('../physics/world').MagnetPGSWorld} MagnetPGSWorld
  */
 
 const ANIMATE_DT = 32; // ~30fps 渲染帧间隔 (ms)
@@ -57,6 +58,14 @@ export function usePhysicsLoop(magnetWorldRef,
   const animIdRef = useRef(null);
   const stepDeltaTimeRef = useRef('');
 
+  const draftcache = {
+    pos: new Map(),
+    vel: new Map(),
+    moment: new Map(),
+    f: new Map(),
+    tau: new Map(),
+  }
+
   /** 单步物理积分，由 rAF 循环调用 */
   const physicsStep = useCallback(() => {
     const {
@@ -65,6 +74,7 @@ export function usePhysicsLoop(magnetWorldRef,
       simSpeed: dt,
       useGravity: useG,
     } = stateRef.current;
+    /** @type {MagnetPGSWorld} */
     const magnetWorld = magnetWorldRef.current;
 
     if (!running || !magnetWorld || currentMagnets.length < 2) return;
@@ -74,16 +84,18 @@ export function usePhysicsLoop(magnetWorldRef,
     setTotalSimTime(prev => prev + safedt);
 
     const idToIdx = new Map(currentMagnets.map((m, i) => [m.id, i]));
-    const bounded = newMagnets.map((mag, i) =>
-      modifyMagnet(currentMagnets[idToIdx.get(mag.id)], {
-        ...mag,
-        pos: assertVec3(mag.pos.map(p => {
-          if (Math.abs(p) > BOUND)
-            throw new Error(`球${i}超出边界: ${mag.pos.map(v => (v * 1000).toFixed(1)).join(',')}mm`);
-          return Math.max(Math.min(p, BOUND), -BOUND);
-        }))
-      })
-    );
+    const bounded = newMagnets.map((mag, i) => {
+      /** @type {import('three').Vector3} */
+      const newPos = new THREE.Vector3(
+        Math.max(Math.min(mag.pos.x, BOUND), -BOUND),
+        Math.max(Math.min(mag.pos.y, BOUND), -BOUND),
+        Math.max(Math.min(mag.pos.z, BOUND), -BOUND),
+      );
+      if (newPos.x !== mag.pos.x || newPos.y !== mag.pos.y || newPos.z !== mag.pos.z) {
+        throw (`磁铁${mag.id}位置超出边界: ${mag.pos.toArray().map(v => (v * 1000).toFixed(1)).join(',')}mm`);
+      }
+      return modifyMagnet(currentMagnets[idToIdx.get(mag.id)], { ...mag, pos: newPos })
+    });
 
     setMagnets(bounded);
     needsSyncRef.current = true;
@@ -95,11 +107,7 @@ export function usePhysicsLoop(magnetWorldRef,
       if (mag) {
         setEditDraft(d => d ? {
           ...d,
-          m_pos: mag.pos.map(p => p * 1000).map(fmt),
-          m_vel: (mag.vel ?? [0, 0, 0]).map(v => v * 1000).map(fmt),
-          moment: mag.moment.map(fmt),
-          f: (mag.f ?? [0, 0, 0]).map(fmt),
-          tau: (mag.tau ?? [0, 0, 0]).map(fmt),
+          ...magnet2Draft(mag),
         } : d);
       }
     }

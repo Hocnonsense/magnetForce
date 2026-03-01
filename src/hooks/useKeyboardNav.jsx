@@ -1,25 +1,24 @@
 import { useCallback } from 'react';
-import * as THREE from 'three';
+import { Vector3, Quaternion } from 'three';  // 仅导入需要的类
 import { reframeCoordinates as _reframeCoordinates } from '../data/magnet-type';
-import * as Three from '../utils/three';
+import { getCenter } from '../utils/coordinates.jsx';
 
 /**
  * @typedef {import('../data/magnet-type').Magnet} Magnet
- * @typedef {Three.Vec3} Vec3
+ * @typedef {import('three').PerspectiveCamera} PerspectiveCamera
+ * @typedef {import('three').WebGLRenderer} WebGLRenderer
  */
-
 
 /**
  * 根据当前相机距离算白圈在物理坐标下的宽度
- * @param {Three.Vec3} refPoint 参考点（默认原点）
- * @param {THREE.PerspectiveCamera} camera
- * @param {THREE.WebGLRenderer} renderer
+ * @param {Vector3} refPoint 参考点（默认原点）
+ * @param {PerspectiveCamera} camera
+ * @param {WebGLRenderer} renderer
  */
 function getRingWorldWidth(refPoint, camera, renderer) {
   if (!camera || !renderer) return 0;
-  /** @type {Vec3} */
-  const target = refPoint ?? [0, 0, 0];
-  const dist = Three.Length(Three.DistanceTo(camera.position.toArray(), target));
+  const target = refPoint ?? new Vector3(0, 0, 0);
+  const dist = camera.position.distanceTo(target);
   const fov = camera.fov * Math.PI / 180;
   const screenH = renderer.domElement.height;
   const pixelPerUnit = screenH / (2 * dist * Math.tan(fov / 2));
@@ -27,21 +26,10 @@ function getRingWorldWidth(refPoint, camera, renderer) {
   return pixelPerUnit
 };
 
-function getMagnetsCenter(magnets) {
-  /** @type {Vec3} */
-  const c = [0, 0, 0];
-  const cnt = magnets.length;
-  if (cnt === 0) return c;
-  magnets.forEach(m => {
-    Three.add(c, m.pos);
-  });
-  Three.multiplyScalar(c, 1 / cnt);
-  return c;
-}
-
 /**
  * 检查 movedIds 平移 delta 后是否与其他球碰撞
  * @param {Magnet[]} mags
+ * @param {Vector3} delta
  * @returns {Map<string, number[]> | null} id → 新位置（物理坐标），碰撞则返回 null
  */
 function tryMove(mags, movedIds, delta, MAGNET_RADIUS) {
@@ -50,11 +38,11 @@ function tryMove(mags, movedIds, delta, MAGNET_RADIUS) {
   const n = mags.length;
   for (let i = 0; i < n; i++) {
     if (!movedIds.has(mags[i].id)) continue;
-    const p = Three.add([...mags[i].pos], delta);
+    const p = new Vector3(...mags[i].pos).add(delta);
     newPos.set(mags[i].id, p);
     for (const { id, pos } of mags) {
       if (movedIds.has(id)) continue;
-      const d = Three.Length(Three.DistanceTo(p, pos));
+      const d = p.distanceTo(pos);
       if (d < minD) return;
     }
   }
@@ -64,36 +52,35 @@ function tryMove(mags, movedIds, delta, MAGNET_RADIUS) {
 /**
  * 检查 ids 绕 center 旋转 angle（弧度）后是否碰撞
  * @param {Magnet[]} mags
- * @param {Vec3} center
- * @param {THREE.Quaternion} q
- * @returns {Map<string, { pos: number[], moment: number[] }> | null} id → 新位置（物理坐标），碰撞则返回 null
+ * @param {Vector3} center
+ * @param {Quaternion} q
+ * @returns {Map<string, { pos: Vector3, moment: Vector3 }> | null} id → 新位置（物理坐标），碰撞则返回 null
  */
 function tryRotate(mags, movedIds, center, q, MAGNET_RADIUS) {
   const minD = MAGNET_RADIUS * 2 * 0.999;
   const newPosMoment = new Map();
   const n = mags.length;
-  const _q = [q.x, q.y, q.z, q.w];
   for (let i = 0; i < n; i++) {
     if (!movedIds.has(mags[i].id)) continue;
-    const p = Three.add(Three.applyQuaternion(Three.DistanceTo(center, mags[i].pos), _q), center);
+    const p = center.clone().add(mags[i].pos.clone().sub(center).applyQuaternion(q));
     newPosMoment.set(mags[i].id, { pos: p });
     for (const { id, pos } of mags) {
       if (movedIds.has(id)) continue;
-      const d = Three.Length(Three.DistanceTo(p, pos));
+      const d = p.distanceTo(pos);
       if (d < minD) return;
     }
   }
   newPosMoment.forEach((pos, id) => {
     const m = mags.find(m => m.id === id);
-    newPosMoment.get(id).moment = Three.applyQuaternion(m.moment, _q);
+    newPosMoment.get(id).moment = m.moment.clone().applyQuaternion(q);
   });
   return newPosMoment;
 }
 
 function getCamera3D(camera) {
-  const forward = new THREE.Vector3(); camera.getWorldDirection(forward);
-  const right = new THREE.Vector3(); right.crossVectors(forward, camera.up).normalize();
-  const up = new THREE.Vector3(); up.crossVectors(right, forward).normalize();
+  const forward = new Vector3(); camera.getWorldDirection(forward);
+  const right = new Vector3(); right.crossVectors(forward, camera.up).normalize();
+  const up = new Vector3(); up.crossVectors(right, forward).normalize();
   return { forward, right, up };
 }
 
@@ -107,26 +94,26 @@ export function useKeyboardNav(
     // 模拟时不允许操作
     if (stateRef.current.isSimulating) return;
     const effIds = getIdsInAffectedGroup(); if (effIds.size === 0) return;
-    /** @type {THREE.PerspectiveCamera} */
+    /** @type {PerspectiveCamera} */
     const camera = cameraRef.current; if (!camera) return;
     // 相机空间方向
     const { forward, right, up } = getCamera3D(camera);
     /** 选中球的质心（物理坐标） */
-    const center = getMagnetsCenter(stateRef.current.magnets.filter(m => effIds.has(m.id)));
+    const center = getCenter(stateRef.current.magnets.filter(m => effIds.has(m.id)).map(m => m.pos));
     /** 白圈世界宽度（物理坐标） */
     const ringW = RING_PX / VISUAL_SCALE / getRingWorldWidth(center, camera, rendererRef.current);
     let delta = null, rotAxis = null;
     switch (e.key) {
-      // ── 方向键：平移 ──
-      case 'ArrowRight': delta = [right.x * ringW, right.y * ringW, right.z * ringW]; break;
-      case 'ArrowLeft': delta = [-right.x * ringW, -right.y * ringW, -right.z * ringW]; break;
-      case 'ArrowUp': delta = [up.x * ringW, up.y * ringW, up.z * ringW]; break;
-      case 'ArrowDown': delta = [-up.x * ringW, -up.y * ringW, -up.z * ringW]; break;
-      case 'PageUp': rotAxis = right.clone().negate(); break;
-      case 'PageDown': rotAxis = right.clone(); break;
-      case 'Home': rotAxis = up.clone().negate(); break;
-      case 'End': rotAxis = up.clone(); break;
-      case 'Tab': rotAxis = e.shiftKey ? forward.clone().negate() : forward.clone(); break;
+      // ── 方向键：平移 ── 无需克隆, 用完即丢
+      case 'ArrowRight': delta = right.multiplyScalar(ringW); break;
+      case 'ArrowLeft': delta = right.multiplyScalar(-ringW); break;
+      case 'ArrowUp': delta = up.multiplyScalar(ringW); break;
+      case 'ArrowDown': delta = up.multiplyScalar(-ringW); break;
+      case 'PageUp': rotAxis = right.negate(); break;
+      case 'PageDown': rotAxis = right; break;
+      case 'Home': rotAxis = up.negate(); break;
+      case 'End': rotAxis = up; break;
+      case 'Tab': rotAxis = e.shiftKey ? forward.negate() : forward; break;
     }
     if (delta) {
       e.preventDefault();
@@ -143,7 +130,7 @@ export function useKeyboardNav(
       e.preventDefault();
       const angle = Math.atan2(ringW, MAGNET_RADIUS);
       const axis = rotAxis;
-      const q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+      const q = new Quaternion().setFromAxisAngle(axis, angle);
       setMagnets(prev => {
         const newPos = tryRotate(prev, effIds, center, q, MAGNET_RADIUS);
         if (!newPos) return prev;

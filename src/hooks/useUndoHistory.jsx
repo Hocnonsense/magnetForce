@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { Vector3 } from 'three';
 
 /**
  * @typedef {import('../data/magnet-type').Magnet} Magnet
@@ -15,18 +16,17 @@ import { useCallback, useEffect, useRef } from 'react';
  *
  * @param {{
  *   getMagnets: () => Magnet[],
- *   setMagnets: (m: Magnet[]) => void,
  *   selectedId: number | null,
  *   onApplySnap: (snap: Magnet[]) => void,
  * }} options
  */
-export function useUndoHistory({ getMagnets, setMagnets, selectedId, onApplySnap }) {
+export function useUndoHistory({ getMagnets, selectedId, onApplySnap }) {
   const undoStackRef = useRef([]);   // Magnet[][] 快照栈
   const histIdxRef = useRef(-1);    // -1 = live
 
   /** 深拷贝一组磁球 */
   const cloneMagnets = (mags) =>
-    mags.map(m => ({ ...m, pos: [...m.pos], vel: [...m.vel], moment: [...m.moment] }));
+    mags.map(m => ({ ...m, pos: m.pos.clone(), vel: m.vel.clone(), moment: m.moment.clone() }));
 
   /**
    * 将一个快照推入撤销栈（自动去重、限制 100 条）
@@ -103,6 +103,8 @@ function isSameSnapshot(a, b) {
       if (Array.isArray(va) && Array.isArray(vb)) {
         if (va.length !== vb.length) return false;
         if (va.some((v, j) => Math.abs(v - vb[j]) > 1e-6)) return false;
+      } else if (va instanceof Vector3 && vb instanceof Vector3) {
+        if (va.distanceTo(vb) > 1e-12) return false;
       } else if (va !== vb) {
         return false;
       }

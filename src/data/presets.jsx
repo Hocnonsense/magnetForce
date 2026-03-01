@@ -1,4 +1,4 @@
-import * as Three from '../utils/three';
+import * as THREE from 'three';
 import { createMagnet } from './magnet-type';
 
 /**
@@ -9,7 +9,7 @@ import { createMagnet } from './magnet-type';
  * @returns {Magnet[]}
  */
 export function applyRadius(magnets, radius) {
-  return magnets.map(m => ({ ...m, pos: Three.multiplyScalar(m.pos, radius) })).map(createMagnet);
+  return magnets.map(m => ({ ...m, pos: m.pos.multiplyScalar(radius) })).map(createMagnet);
 }
 
 const GROUP_COLORS = [
@@ -30,8 +30,8 @@ export function exportJson(magnets, name = "preset", unit = "m") {
     unit: unit,
     magnets: magnets.map(m => {
       const m1 = {
-        pos: m.pos.join(', '),
-        moment: m.moment.join(', '),
+        pos: m.pos.toArray().join(', '),
+        moment: m.moment.toArray().join(', '),
         ...(m.group ? { group: m.group } : {})
       }
       if (m.color === undefined) return m1;
@@ -90,8 +90,8 @@ export function parsePresetTSV(text) {
       })();
 
     magnets.push({
-      pos: [x, y, z],
-      m: Three.normalize([mx, my, mz]),
+      pos: new THREE.Vector3(x, y, z),
+      m: new THREE.Vector3(mx, my, mz).normalize(),
       color,
       ...(group ? { group } : {}),
     });
@@ -117,7 +117,7 @@ export function parsePresetJson(text) {
     if (typeof x === 'string') {
       const parts = x.split(',').map(s => parseFloat(s.trim()));
       if (parts.length === 3 && parts.every(n => !isNaN(n))) {
-        return parts;
+        return new THREE.Vector3(...parts);
       }
     }
     return x;
@@ -127,8 +127,8 @@ export function parsePresetJson(text) {
     for (const [key, val] of Object.entries(m)) {
       processed[key] = tryUnpackVec3(val);
     }
-    Three.assertVec3(processed.pos);
-    Three.assertVec3(Three.normalize(processed.moment));
+    processed.pos;
+    processed.moment.normalize();
     magnets.push(processed);
   }
   return { name, unit, magnets };
@@ -155,7 +155,7 @@ export async function loadPreset(name, radius_m = 0.0025) {
     if (name in PRESETS) {
       console.warn(`Preset "${name}" not found as file, falling back to built-in.`);
       const magnets = PRESETS[name]()
-      magnets.map(m => Three.multiplyScalar(m.pos, radius_m));
+      magnets.map(m => m.pos.multiplyScalar(radius_m));
       return { name, magnets: magnets.map(createMagnet) };
     }
     throw new Error(`Preset "${name}" is not valid JSON`);
@@ -179,27 +179,27 @@ export async function listPresets() {
 // Presets
 export const PRESETS = {
   chain: () => Array.from({ length: 5 }, (_, i) => ({
-    pos: [(i - 2) * 2 * 1.1, 0, 0],
-    m: [1, 0, 0],
+    pos: new THREE.Vector3((i - 2) * 2 * 1.1, 0, 0),
+    m: new THREE.Vector3(1, 0, 0),
     color: i % 2 ? 0x4444ff : 0xff4444
   })),
   ring: () => Array.from({ length: 6 }, (_, i) => {
     const a = (2 * Math.PI * i) / 6;
     const ringRadius = 2 * 2;  // 10mm
     return {
-      pos: [ringRadius * Math.cos(a), ringRadius * Math.sin(a), 0],
-      m: [Math.cos(a + Math.PI / 2), Math.sin(a + Math.PI / 2), 0],
+      pos: new THREE.Vector3(ringRadius * Math.cos(a), ringRadius * Math.sin(a), 0),
+      m: new THREE.Vector3(Math.cos(a + Math.PI / 2), Math.sin(a + Math.PI / 2), 0),
       color: i % 2 ? 0x4444ff : 0xff4444
     };
   }),
   random: () => Array.from({ length: 8 }, (_, i) => ({
-    pos: [
+    pos: new THREE.Vector3(
       (Math.random() - 0.5) * 2 * 10,
       (Math.random() - 0.5) * 2 * 10,
       (Math.random() - 0.5) * 2 * 4
-    ],
+    ),
     //m: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().toArray(),
-    m: Three.normalize([Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5]),
+    m: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(),
     color: i % 2 ? 0x4444ff : 0xff4444
   })),
   cube: () => {
@@ -207,10 +207,10 @@ export const PRESETS = {
     const positions = [
       [-1, -1, -1], [1, -1, -1], [-1, 1, -1], [1, 1, -1],
       [-1, -1, 1], [1, -1, 1], [-1, 1, 1], [1, 1, 1]
-    ];
+    ].map(p => new THREE.Vector3(...p));
     return positions.map((p, i) => ({
-      pos: p.map(x => x * halfSize),
-      m: [0, 0, i < 4 ? 1 : -1],
+      pos: p.multiplyScalar(halfSize),
+      m: new THREE.Vector3(0, 0, i < 4 ? 1 : -1),
       color: i < 4 ? 0xff4444 : 0x4444ff
     }));
   }
