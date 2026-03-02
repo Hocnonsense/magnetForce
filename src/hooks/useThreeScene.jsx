@@ -269,10 +269,10 @@ export function useThreeScene(
       /** @type {THREE.ArrowHelper} Torque arrow */
       const tArrow = torqueArrows[idx];
       if (tArrow) {
-        const tMag = mag.tau ? new THREE.Vector3(...mag.tau).length() : 0;
+        const tMag = mag.tau ? mag.tau.length() : 0;
         if (tMag > 1e-25) {
           tArrow.visible = true;
-          const tDir = new THREE.Vector3(...mag.tau).normalize();
+          const tDir = mag.tau.clone().normalize();
           const tLen = VISUAL_RADIUS * Math.min(5, Math.max(0.4, Math.log10(tMag + 1e-10) + 8));
           tArrow.position.copy(origin);
           tArrow.setDirection(tDir);

@@ -75,7 +75,7 @@ function magneticForce(igeo) {
   const coeff = 3 * K / d4;
   const d_s = r - 5 * p * q;
   return d_hat.clone().multiplyScalar(d_s)
-    .add(m1.clone().multiplyScalar(-q))
+    .add(m1.clone().multiplyScalar(q))
     .add(m2.clone().multiplyScalar(p))
     .multiplyScalar(coeff);
 }
@@ -113,8 +113,7 @@ function magneticTorque(igeo) {
 export function calculateMagnet(R, M, m1, m2, d) {
   const igeo = _geometry(R, M, m1, m2, d);
   const U = magneticEnergy(igeo);
-  const force1 = magneticForce(igeo);
-  const force2 = force1.clone().negate(); // F on sphere 1 is opposite to F on sphere 2
+  const fOn2 = magneticForce(igeo);
   const { tor1, tor2 } = magneticTorque(igeo);
-  return { U, force1, force2, torque1: tor1, torque2: tor2 };
+  return { U, force1: fOn2.clone().negate(), force2: fOn2, torque1: tor1, torque2: tor2 };
 }

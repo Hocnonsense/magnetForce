@@ -420,9 +420,8 @@ function updateFrictionForce(base, lambda, Ff, dir, mu, SOFT_TOLERANCE) {
  * @returns {[Vector3, Vector3, Vector3]} [t1, t2]
  */
 function tangentBasis(n) {
-  /** */
   const aux = Math.abs(n.x) < 0.9 ? new Vector3(1, 0, 0) : new Vector3(0, 1, 0);
-  const t1 = aux.cross(n).normalize();
+  const t1 = aux.cross(n).normalize().negate();
   const t2 = n.clone().cross(t1);
   return [n, t1, t2];
 }
@@ -594,26 +593,33 @@ function buildConstraintSystem(contacts, activeIdx, _fixedFlags, vectors) {
 }
 
 /**
- * 求解稀疏线性方程组 Ax = b
- * 当前实现：CSR → dense 转换 + 高斯消元（部分选主元）
- * 将来可替换为稀疏 Cholesky / 共轭梯度等，接口不变
+ * 高斯消元法求解线性方程组 Ax = b（列主元 + 自适应阈值）
+ * 适用于 n < 300 的物理约束系统，退化变量处理符合力学原理
  *
- * @param {SparseCSR} A
- * @param {Float64Array} b
- * @returns {Float64Array|null}
+ * - pivotOk[col]=0 表示该约束自由度退化（如2D中t2方向无相对运动）
+ * - 退化变量设 x[col]=0 是物理自洽的最小范数解（无约束力）
+ *
+ * @param {Object} A - CSR稀疏矩阵 {n, rowPtr, colIdx, values}
+ * @param {Float64Array} b - 右端项（原始值，函数内不修改）
+ * @returns {Float64Array} 解向量 x
  */
 function solveLinearSystem(A, b) {
   const na = A.n;
+  if (na === 0) return new Float64Array(0);
   // CSR → dense（暂时，将来替换）
   const D = Array.from({ length: na }, () => new Float64Array(na));
+  let maxAbsA = 0;
   for (let r = 0; r < na; r++) {
     for (let p = A.rowPtr[r]; p < A.rowPtr[r + 1]; p++) {
       D[r][A.colIdx[p]] = A.values[p];
+      const absVal = Math.abs(A.values[p]);
+      if (absVal > maxAbsA) maxAbsA = absVal;
     }
   }
   const bb = new Float64Array(b);
+  const pivotTol = Math.max(maxAbsA * na * 2.2e-16, 1e-20);
+  const pivotOk = new Uint8Array(na);
 
-  // 高斯消元（部分选主元）
   for (let col = 0; col < na; col++) {
     let maxVal = Math.abs(D[col][col]);
     let maxRow = col;
@@ -621,7 +627,8 @@ function solveLinearSystem(A, b) {
       const v = Math.abs(D[row][col]);
       if (v > maxVal) { maxVal = v; maxRow = row; }
     }
-    if (maxVal < 1e-12) return null;
+    if (maxVal < pivotTol) { pivotOk[col] = 0; continue; }
+    pivotOk[col] = 1;
     if (maxRow !== col) {
       const tmpA = D[col]; D[col] = D[maxRow]; D[maxRow] = tmpA;
       const tmpB = bb[col]; bb[col] = bb[maxRow]; bb[maxRow] = tmpB;
@@ -638,6 +645,7 @@ function solveLinearSystem(A, b) {
   }
   const x = new Float64Array(na);
   for (let row = na - 1; row >= 0; row--) {
+    if (!pivotOk[row]) continue; // x[row] 已是 0
     let sum = bb[row];
     for (let k = row + 1; k < na; k++) {
       sum -= D[row][k] * x[k];

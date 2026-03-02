@@ -53,6 +53,7 @@ export function usePhysicsLoop(magnetWorldRef,
   setMagnets,
   setEditDraft,
   setTotalSimTime,
+  setIsSimulating,
   fmt,
 ) {
   const animIdRef = useRef(null);
@@ -135,6 +136,7 @@ export function usePhysicsLoop(magnetWorldRef,
       }
       controls?.update();
       renderer.render(scene, camera);
+      //setIsSimulating(false); // 物理步完成后重置 simulating 状态，等待下一次触发
     };
 
     animIdRef.current = requestAnimationFrame(animate);

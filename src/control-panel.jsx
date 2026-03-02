@@ -99,7 +99,7 @@ export default function MagnetSimulator() {
     magnetWorldRef, stateRef, ready,
     containerRef, sceneRef, cameraRef, rendererRef, controlsRef,
     needsSyncRef, selectedIdsRef,
-    setMagnets, setEditDraft, setTotalSimTime, fmt,
+    setMagnets, setEditDraft, setTotalSimTime, setIsSimulating, fmt,
   );
 
   const { meshesRef } = useThreeScene(

@@ -40,13 +40,13 @@ export class MagnetPGSWorld {
     const coforces = magnets.map(() => new Vector3(0, 0, 0));
     const torques = magnets.map(() => new Vector3(0, 0, 0));
     const forces = magnets.map(() => new Map());
-
+    const _d = new Vector3();
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         const ft = calculateMagnet(
           radius, mMag,
           magnets[i].moment, magnets[j].moment,
-          magnets[i].pos.clone().sub(magnets[j].pos)
+          _d.copy(magnets[j].pos).sub(magnets[i].pos)
         )
         coforces[i].add(ft.force1);
         coforces[j].add(ft.force2);
@@ -79,8 +79,8 @@ export class MagnetPGSWorld {
       coforces.forEach((f, i) => {
         if (!fixedFlags[i]) {
           const g = GRAVITY * this.params.mass;
-          f[1] += g;
-          forces[i].set('Gravity', [0, g, 0]);
+          f.y += g;
+          forces[i].set('Gravity', new Vector3(0, g, 0));
         }
       });
     }
