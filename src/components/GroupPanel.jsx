@@ -1,5 +1,5 @@
 import React from 'react';
-import { secStyle, lbl, chipBtn } from '../styles';
+import { secStyle, lbl, chipBtn, smallBtnStyle, Collapse } from '../styles';
 
 /**
  * @typedef {import('../hooks/useGrouping').GroupingState} GroupingState
@@ -13,45 +13,64 @@ import { secStyle, lbl, chipBtn } from '../styles';
  * @param {Set<number>} props.selectedIds
  * @param {() => void} props.onDeselect       - 取消选择（清空 activeGroup + newGroupName）
  * @param {() => void} props.onRemoveMagnet
+ * @param {() => void} props.adsorbToAxis
+ * @param {(string) => void} props.saveGroupAsPreset
+ * @param {import('react').ReactNode} [props.presetPanel] - 可选子元素（如扩展操作按钮）
  */
 export function GroupPanel({
   grouping,
   selectedIds,
   onDeselect,
   onRemoveMagnet,
+  adsorbToAxis,
+  saveGroupAsPreset,
+  presetPanel, // 👈 新增：接收子元素
 }) {
   const { groups, activeGroup, newGroupName, setNewGroupName,
     createGroup, selectGroup, deleteGroup, confirmRename } = grouping;
   const hasRename = newGroupName.trim() && newGroupName.trim() !== activeGroup;
 
-  return (
-    <div style={secStyle}>
-      {/* ── 分组标题行 ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', ...lbl }}>
-        <span>分组</span>
-        {selectedIds.size > 0 && (
-          <span
-            onClick={createGroup}
-            style={{ fontSize: '10px', color: '#6bd5ff', cursor: 'pointer', marginLeft: 'auto' }}
-          >
+  return Collapse(
+    secStyle,
+    <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>分组</div>,
+    <div>
+      <div style={{ gap: '6px', display: 'flex', flexWrap: 'wrap', ...lbl }}>
+        {selectedIds.size > 1 && (
+          <button onClick={createGroup} style={{ ...smallBtnStyle, color: '#6bd5ff' }}>
             创建分组 (Ctrl+G)
-          </span>
+          </button>
         )}
         {activeGroup && (
-          <span
+          <button
             onClick={() => hasRename ? confirmRename() : onDeselect()}
-            style={{ fontSize: '10px', color: hasRename ? '#8ab4f8' : '#aaa', cursor: 'pointer', marginLeft: 'auto' }}
+            style={{ ...smallBtnStyle, color: hasRename ? '#8ab4f8' : '#aaa' }}
           >
             {hasRename ? '重命名' : '取消选择'}
-          </span>
+          </button>
         )}
         {activeGroup && (
-          <span
+          <button
             onClick={() => deleteGroup(activeGroup)}
-            style={{ fontSize: '10px', color: '#ff6b6b', cursor: 'pointer', marginLeft: 'auto' }}
+            style={{ ...smallBtnStyle, color: '#ff6b6b' }}
           >
             取消分组 (Ctrl+Shift+G)
-          </span>
+          </button>
+        )}
+        {activeGroup && (
+          <button
+            onClick={() => saveGroupAsPreset(activeGroup)}
+            style={{ ...smallBtnStyle, color: '#817f0d' }}
+          >
+            💾 存为预设
+          </button>
+        )}
+        {activeGroup && selectedIds.size > 0 && (
+          <button
+            onClick={() => adsorbToAxis()}
+            style={{ ...smallBtnStyle, color: '#972cbe' }}
+          >
+            吸附轴线
+          </button>
         )}
       </div>
 
@@ -67,7 +86,7 @@ export function GroupPanel({
               onChange={e => setNewGroupName(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter') {
-                  if (newGroupName.trim() && newGroupName.trim() !== name) confirmRename();
+                  if (newGroupName.trim() !== name) confirmRename();
                   else onDeselect();
                 }
                 if (e.key === 'Escape') onDeselect();
@@ -123,6 +142,16 @@ export function GroupPanel({
           ))}
         </div>
       )}
-    </div>
+
+      {presetPanel && (
+        <div style={{ alignItems: 'center', gap: '6px', ...lbl, marginTop: '8px' }}>
+          <div style={lbl}>
+            预设结构
+          </div>
+          <div className="group-panel-footer">{presetPanel}</div>
+        </div>
+      )}
+    </div>,
+    true
   );
 }

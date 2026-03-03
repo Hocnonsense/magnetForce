@@ -24,7 +24,6 @@ const BOUND = 0.1;     // 位置边界 (m)
  *     magnets: Magnet[],
  *     isSimulating: boolean,
  *     simSpeed: number,
- *     rotateMoments: boolean,
  *     useGravity: boolean,
  *   }>} stateRef,
  * @param {boolean} ready,
@@ -38,7 +37,6 @@ const BOUND = 0.1;     // 位置边界 (m)
  * @param {Function} setMagnets,
  * @param {Function} setEditDraft,
  * @param {Function} setTotalSimTime,
- * @param {(v: number) => string} fmt,
  */
 export function usePhysicsLoop(magnetWorldRef,
   stateRef,
@@ -54,7 +52,6 @@ export function usePhysicsLoop(magnetWorldRef,
   setEditDraft,
   setTotalSimTime,
   setIsSimulating,
-  fmt,
 ) {
   const animIdRef = useRef(null);
   const stepDeltaTimeRef = useRef('');
@@ -114,7 +111,7 @@ export function usePhysicsLoop(magnetWorldRef,
     }
   }, [
     stateRef, magnetWorldRef, needsSyncRef,
-    selectedIdsRef, setMagnets, setEditDraft, setTotalSimTime, fmt,
+    selectedIdsRef, setMagnets, setEditDraft, setTotalSimTime,
   ]);
 
   // rAF 循环：渲染 + 定时触发物理步

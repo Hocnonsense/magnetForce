@@ -50,15 +50,14 @@ export function useUndoHistory({ getMagnets, selectedId, onApplySnap }) {
     histIdxRef.current = -1;
   }, []);
 
-  // ArrowUp / ArrowDown 键盘导航
   useEffect(() => {
     const handler = (e) => {
-      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      if (!(e.ctrlKey && ['z', 'Z'].includes(e.key))) return;
       e.preventDefault();
       const stack = undoStackRef.current;
       if (stack.length === 0) return;
 
-      if (e.key === 'ArrowUp') {
+      if (!e.shiftKey) { // ArrowUp
         if (histIdxRef.current === -1) {
           // 保存当前 live 状态作为草稿压入栈顶
           stack.push(cloneMagnets(getMagnets()));

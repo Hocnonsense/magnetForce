@@ -1,8 +1,32 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { reframeCoordinates as _reframeCoordinates } from '../data/magnet-type';
 
+
+/**
+ * 屏幕坐标 → 物理坐标（投射到过场景中心且垂直于视线的平面）
+ * @param {HTMLElement} container
+ * @param {THREE.PerspectiveCamera} camera
+ */
+export function screenToPhysics(container, camera, clientX, clientY, VISUAL_SCALE) {
+  if (!container || !camera) return [0, 0, 0];
+  const rect = container.getBoundingClientRect();
+  const ndc = new THREE.Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(ndc, camera);
+  // 投射到 z=0 平面（视觉坐标），若平行则用固定距离
+  const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+  const hit = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(plane, hit)) {
+    // 平行时用相机前方固定距离
+    raycaster.ray.at(10, hit);
+  }
+  return hit.multiplyScalar(1 / VISUAL_SCALE); // 转换到物理坐标
+}
 
 /**
  * @typedef {import('../data/magnet-type').Magnet} Magnet
@@ -21,14 +45,13 @@ import { reframeCoordinates as _reframeCoordinates } from '../data/magnet-type';
  * @param {Set<number>} State.selectedIds,
  * @param {string|null} State.activeGroup,
  * @param {Object} State.groups,
- * @param {boolean} State.showVectors,
  * @param {boolean} State.ready,
  * @param {Function} State.getIdsInAffectedGroup,
  * @param {React.RefObject<HTMLElement>} State.keyTrapRef,
  */
 export function useThreeScene(
   { containerRef, sceneRef, cameraRef, rendererRef, controlsRef },
-  { magnets, selectedIds, activeGroup, groups, showVectors, ready, getIdsInAffectedGroup, keyTrapRef },
+  { magnets, selectedIds, activeGroup, groups, ready, getIdsInAffectedGroup, keyTrapRef },
   VISUAL_RADIUS, VISUAL_SCALE, RING_PX
 ) {
   const meshesRef = useRef([]);
@@ -36,6 +59,8 @@ export function useThreeScene(
   const forceArrowsRef = useRef([]);
   const torqueArrowsRef = useRef([]);
   const ringsRef = useRef([]);
+  const [showMoments, setShowMoments] = useState(true);
+  const [showForceTorques, setShowForceTorques] = useState(true);
 
   // ── Three.js 初始化 ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -167,39 +192,42 @@ export function useThreeScene(
       scene.add(ring);
       rings.push(ring);
 
-      if (!showVectors) {
+      if (showMoments) {
+        const arrow = new THREE.ArrowHelper(
+          dummyDir, new THREE.Vector3(), VISUAL_RADIUS * 3.6,
+          0xffdd00, VISUAL_RADIUS * 0.5, VISUAL_RADIUS * 0.3
+        );
+        scene.add(arrow);
+        arrows.push(arrow);
+      } else {
         arrows.push(null);
+      }
+      if (showForceTorques) {
+        const fArrow = new THREE.ArrowHelper(
+          dummyDir, new THREE.Vector3(), VISUAL_RADIUS,
+          0x00ffff, VISUAL_RADIUS * 0.4, VISUAL_RADIUS * 0.24
+        );
+        fArrow.visible = false;
+        scene.add(fArrow);
+        forceArrows.push(fArrow);
+        const tArrow = new THREE.ArrowHelper(
+          dummyDir, new THREE.Vector3(), VISUAL_RADIUS,
+          0xff00ff, VISUAL_RADIUS * 0.32, VISUAL_RADIUS * 0.2
+        );
+        tArrow.visible = false;
+        scene.add(tArrow);
+        torqueArrows.push(tArrow);
+      } else {
         forceArrows.push(null);
         torqueArrows.push(null);
-        return;
       }
-      const arrow = new THREE.ArrowHelper(
-        dummyDir, new THREE.Vector3(), VISUAL_RADIUS * 3.6,
-        0xffdd00, VISUAL_RADIUS * 0.5, VISUAL_RADIUS * 0.3
-      );
-      scene.add(arrow);
-      arrows.push(arrow);
-      const fArrow = new THREE.ArrowHelper(
-        dummyDir, new THREE.Vector3(), VISUAL_RADIUS,
-        0x00ffff, VISUAL_RADIUS * 0.4, VISUAL_RADIUS * 0.24
-      );
-      fArrow.visible = false;
-      scene.add(fArrow);
-      forceArrows.push(fArrow);
-      const tArrow = new THREE.ArrowHelper(
-        dummyDir, new THREE.Vector3(), VISUAL_RADIUS,
-        0xff00ff, VISUAL_RADIUS * 0.32, VISUAL_RADIUS * 0.2
-      );
-      tArrow.visible = false;
-      scene.add(tArrow);
-      torqueArrows.push(tArrow);
     });
     meshesRef.current = meshes;
     arrowsRef.current = arrows;
     forceArrowsRef.current = forceArrows;
     torqueArrowsRef.current = torqueArrows;
     ringsRef.current = rings;
-  }, [magnets.length, showVectors, ready]);
+  }, [magnets.length, showMoments, showForceTorques, ready]);
 
   // ── 更新位置/外观/白圈 ────────────────────────────────────────────────────
   useEffect(() => {
@@ -241,48 +269,51 @@ export function useThreeScene(
           ring.geometry = new THREE.TorusGeometry(majorR, minorR, 8, 64);
         }
       }
-      if (!showVectors) return;
-      /** @type {THREE.ArrowHelper} Moment arrow */
-      const arrow = arrows[idx];
-      if (arrow) {
-        const dir = mag.moment.clone().normalize();
-        arrow.position.copy(origin);
-        arrow.setDirection(dir);
-        arrow.setLength(VISUAL_RADIUS * 3.6, VISUAL_RADIUS * 0.5, VISUAL_RADIUS * 0.3);
-      }
-      /** @type {THREE.ArrowHelper} Force arrow */
-      const fArrow = forceArrows[idx];
-      if (fArrow) {
-        const fMag = mag.f ? mag.f.length() : 0;
-        if (fMag > 1e-25) {
-          fArrow.visible = true;
-          const fDir = mag.f.clone().normalize();
-          // 基于力的大小，范围 0.5R ~ 6R
-          const fLen = VISUAL_RADIUS * Math.min(6, Math.max(0.5, Math.log10(fMag + 1e-10) + 10));
-          fArrow.position.copy(origin);
-          fArrow.setDirection(fDir);
-          fArrow.setLength(fLen, VISUAL_RADIUS * 0.4, VISUAL_RADIUS * 0.24);
-        } else {
-          fArrow.visible = false;
+      if (showMoments) {
+        /** @type {THREE.ArrowHelper} Moment arrow */
+        const arrow = arrows[idx];
+        if (arrow) {
+          const dir = mag.moment.clone().normalize();
+          arrow.position.copy(origin);
+          arrow.setDirection(dir);
+          arrow.setLength(VISUAL_RADIUS * 3.6, VISUAL_RADIUS * 0.5, VISUAL_RADIUS * 0.3);
         }
-      }
-      /** @type {THREE.ArrowHelper} Torque arrow */
-      const tArrow = torqueArrows[idx];
-      if (tArrow) {
-        const tMag = mag.tau ? mag.tau.length() : 0;
-        if (tMag > 1e-25) {
-          tArrow.visible = true;
-          const tDir = mag.tau.clone().normalize();
-          const tLen = VISUAL_RADIUS * Math.min(5, Math.max(0.4, Math.log10(tMag + 1e-10) + 8));
-          tArrow.position.copy(origin);
-          tArrow.setDirection(tDir);
-          tArrow.setLength(tLen, VISUAL_RADIUS * 0.32, VISUAL_RADIUS * 0.2);
-        } else {
-          tArrow.visible = false;
+      };
+      if (showForceTorques) {
+        /** @type {THREE.ArrowHelper} Force arrow */
+        const fArrow = forceArrows[idx];
+        if (fArrow) {
+          const fMag = mag.f ? mag.f.length() : 0;
+          if (fMag > 1e-25) {
+            fArrow.visible = true;
+            const fDir = mag.f.clone().normalize();
+            // 基于力的大小，范围 0.5R ~ 6R
+            const fLen = VISUAL_RADIUS * Math.min(6, Math.max(0.5, Math.log10(fMag + 1e-10) + 10));
+            fArrow.position.copy(origin);
+            fArrow.setDirection(fDir);
+            fArrow.setLength(fLen, VISUAL_RADIUS * 0.4, VISUAL_RADIUS * 0.24);
+          } else {
+            fArrow.visible = false;
+          }
+        }
+        /** @type {THREE.ArrowHelper} Torque arrow */
+        const tArrow = torqueArrows[idx];
+        if (tArrow) {
+          const tMag = mag.tau ? mag.tau.length() : 0;
+          if (tMag > 1e-25) {
+            tArrow.visible = true;
+            const tDir = mag.tau.clone().normalize();
+            const tLen = VISUAL_RADIUS * Math.min(5, Math.max(0.4, Math.log10(tMag + 1e-10) + 8));
+            tArrow.position.copy(origin);
+            tArrow.setDirection(tDir);
+            tArrow.setLength(tLen, VISUAL_RADIUS * 0.32, VISUAL_RADIUS * 0.2);
+          } else {
+            tArrow.visible = false;
+          }
         }
       }
     });
-  }, [magnets, selectedIds, activeGroup, groups, showVectors, ready]);
+  }, [magnets, selectedIds, activeGroup, groups, showMoments, showForceTorques, ready]);
 
-  return { meshesRef };
+  return { meshesRef, showMoments, showForceTorques, setShowMoments, setShowForceTorques };
 }

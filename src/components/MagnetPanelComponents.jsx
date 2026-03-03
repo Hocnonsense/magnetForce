@@ -1,12 +1,5 @@
-/**
- * 磁力模拟器 UI 子组件
- * - EditRow：单行三轴数值输入
- * - SimSection：模拟控制面板
- * - SelectedMagnetPanel：选中磁球的编辑/显示面板
- */
-
 import React from 'react';
-import { smallBtnStyle } from '../styles';
+import { smallBtnStyle, secStyle, Collapse } from '../styles';
 
 /** @type {React.CSSProperties} */
 const EDIT_ROW_STYLE = {
@@ -56,18 +49,15 @@ export function SimSection({
   useGravity, magnets, selectedId, refYId, setRefYId,
   onToggle, onResetVel, onPerturb, onReframe,
   onSimSpeedChange, onGravityChange,
+  showMoments, showForceTorques, setShowMoments, setShowForceTorques,
+  children
 }) {
-  return (
-    <div style={{
-      padding: '12px',
-      background: isSimulating ? 'linear-gradient(135deg, #1a2a1a, #0a150a)' : '#1a1a2a',
-      borderRadius: '8px',
-      border: `1px solid ${isSimulating ? '#2a4a2a' : '#2a2a4a'}`
-    }}>
-      <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>动力学模拟</div>
-
+  return Collapse(
+    secStyle,
+    <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>动力学模拟</div>,
+    <div>
       <button onClick={onToggle} style={{
-        width: '100%', padding: '12px', border: 'none', borderRadius: '6px',
+        width: '100%', padding: '8px', border: 'none', borderRadius: '6px',
         color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', marginBottom: '10px',
         background: isSimulating ? 'linear-gradient(135deg, #aa3333, #882222)' : 'linear-gradient(135deg, #33aa33, #228822)',
       }}>
@@ -113,12 +103,18 @@ export function SimSection({
         />
       </div>
 
-      <CheckboxRow label="重力 (y 方向)" checked={useGravity} onChange={onGravityChange} />
+      <div style={{ display: 'flex', gap: '12px', marginTop: '10px', flexWrap: 'wrap' }}>
+        <CheckboxRow label="重力 (y 方向)" checked={useGravity} onChange={onGravityChange} />
+        <CheckboxRow label="显示磁矩" checked={showMoments} onChange={setShowMoments} />
+        <CheckboxRow label="显示力矩" checked={showForceTorques} onChange={setShowForceTorques} />
+      </div>
+
+      {children && (<>{children}</>)}
     </div>
+    ,
+    true
   );
 }
-
-// ── SelectedMagnetPanel ───────────────────────────────────────────────────────
 
 export function SelectedMagnetPanel({
   selectedId, selectedMag, isSimulating,

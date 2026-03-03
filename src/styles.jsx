@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 export const smallBtnStyle = {
   padding: '8px 12px',
   background: '#1a1a2a',
@@ -37,3 +39,15 @@ export const chipBtn = {
   fontSize: '8px',
   lineHeight: '1'
 };
+
+export function Collapse(style, label, children, defaultOpen = true) {
+  const [expanded, setExpanded] = useState(defaultOpen);
+  return (
+    <div style={style || {}}>
+      <div onClick={() => setExpanded(v => !v)} style={{ cursor: 'pointer' }}>
+        {label}
+      </div>
+      {expanded && children}
+    </div>
+  );
+}

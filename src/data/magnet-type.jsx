@@ -117,7 +117,7 @@ export function assertMagnets(arr) {
  * 将 Vector3 格式化为固定宽度字符串，方便列对齐。
  * @param {Vector3|undefined} v
  */
-function fmtVec3(v, digits = 6, scale = 1) {
+export function fmtVec3(v, digits = 6, scale = 1) {
   if (!v) return '(undefined)';
   return v.toArray().map(x => (x * scale).toFixed(digits));
 }
@@ -206,3 +206,55 @@ export function reframeCoordinates(magnets, selectedId, refYId) {
     tau: rot(m.tau ?? new Vector3()),
   })));
 };
+
+
+/**
+ * 检查 movedIds 平移 delta 后是否与其他球碰撞
+ * @param {Magnet[]} mags
+ * @param {Vector3} delta
+ * @returns {Map<string, number[]> | null} id → 新位置（物理坐标），碰撞则返回 null
+ */
+export function tryMove(mags, movedIds, delta, MAGNET_RADIUS) {
+  const minD = MAGNET_RADIUS * 2 * 0.999;
+  const newPos = new Map();
+  const n = mags.length;
+  for (let i = 0; i < n; i++) {
+    if (!movedIds.has(mags[i].id)) continue;
+    const p = new Vector3(...mags[i].pos).add(delta);
+    newPos.set(mags[i].id, p);
+    for (const { id, pos } of mags) {
+      if (movedIds.has(id)) continue;
+      const d = p.distanceTo(pos);
+      if (d < minD) return;
+    }
+  }
+  return newPos;
+}
+
+/**
+ * 检查 ids 绕 center 旋转 angle（弧度）后是否碰撞
+ * @param {Magnet[]} mags
+ * @param {Vector3} center
+ * @param {import('three').Quaternion} q
+ * @returns {Map<string, { pos: Vector3, moment: Vector3 }> | null} id → 新位置（物理坐标），碰撞则返回 null
+ */
+export function tryRotate(mags, movedIds, center, q, MAGNET_RADIUS) {
+  const minD = MAGNET_RADIUS * 2 * 0.999;
+  const newPosMoment = new Map();
+  const n = mags.length;
+  for (let i = 0; i < n; i++) {
+    if (!movedIds.has(mags[i].id)) continue;
+    const p = center.clone().add(mags[i].pos.clone().sub(center).applyQuaternion(q));
+    newPosMoment.set(mags[i].id, { pos: p });
+    for (const { id, pos } of mags) {
+      if (movedIds.has(id)) continue;
+      const d = p.distanceTo(pos);
+      if (d < minD) return;
+    }
+  }
+  newPosMoment.forEach((pos, id) => {
+    const m = mags.find(m => m.id === id);
+    newPosMoment.get(id).moment = m.moment.clone().applyQuaternion(q);
+  });
+  return newPosMoment;
+}

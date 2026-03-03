@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import { Vector3, Quaternion } from 'three';  // 仅导入需要的类
-import { reframeCoordinates as _reframeCoordinates } from '../data/magnet-type';
+import { Quaternion, Vector3 } from 'three'; // 仅导入需要的类
+import { reframeCoordinates as _reframeCoordinates, tryMove, tryRotate } from '../data/magnet-type';
 import { getCenter } from '../utils/coordinates.jsx';
 
 /**
@@ -25,57 +25,6 @@ function getRingWorldWidth(refPoint, camera, renderer) {
   // 视觉坐标宽度 → 物理坐标宽度
   return pixelPerUnit
 };
-
-/**
- * 检查 movedIds 平移 delta 后是否与其他球碰撞
- * @param {Magnet[]} mags
- * @param {Vector3} delta
- * @returns {Map<string, number[]> | null} id → 新位置（物理坐标），碰撞则返回 null
- */
-function tryMove(mags, movedIds, delta, MAGNET_RADIUS) {
-  const minD = MAGNET_RADIUS * 2 * 0.999;
-  const newPos = new Map();
-  const n = mags.length;
-  for (let i = 0; i < n; i++) {
-    if (!movedIds.has(mags[i].id)) continue;
-    const p = new Vector3(...mags[i].pos).add(delta);
-    newPos.set(mags[i].id, p);
-    for (const { id, pos } of mags) {
-      if (movedIds.has(id)) continue;
-      const d = p.distanceTo(pos);
-      if (d < minD) return;
-    }
-  }
-  return newPos;
-}
-
-/**
- * 检查 ids 绕 center 旋转 angle（弧度）后是否碰撞
- * @param {Magnet[]} mags
- * @param {Vector3} center
- * @param {Quaternion} q
- * @returns {Map<string, { pos: Vector3, moment: Vector3 }> | null} id → 新位置（物理坐标），碰撞则返回 null
- */
-function tryRotate(mags, movedIds, center, q, MAGNET_RADIUS) {
-  const minD = MAGNET_RADIUS * 2 * 0.999;
-  const newPosMoment = new Map();
-  const n = mags.length;
-  for (let i = 0; i < n; i++) {
-    if (!movedIds.has(mags[i].id)) continue;
-    const p = center.clone().add(mags[i].pos.clone().sub(center).applyQuaternion(q));
-    newPosMoment.set(mags[i].id, { pos: p });
-    for (const { id, pos } of mags) {
-      if (movedIds.has(id)) continue;
-      const d = p.distanceTo(pos);
-      if (d < minD) return;
-    }
-  }
-  newPosMoment.forEach((pos, id) => {
-    const m = mags.find(m => m.id === id);
-    newPosMoment.get(id).moment = m.moment.clone().applyQuaternion(q);
-  });
-  return newPosMoment;
-}
 
 function getCamera3D(camera) {
   const forward = new Vector3(); camera.getWorldDirection(forward);
