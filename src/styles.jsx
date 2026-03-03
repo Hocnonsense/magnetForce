@@ -40,14 +40,14 @@ export const chipBtn = {
   lineHeight: '1'
 };
 
-export function Collapse(style, label, children, defaultOpen = true) {
-  const [expanded, setExpanded] = useState(defaultOpen);
+export function Collapse(label, children, defaultOpen = true, style = secStyle) {
+  const [collapse, setCollapse] = useState(defaultOpen);
   return (
     <div style={style || {}}>
-      <div onClick={() => setExpanded(v => !v)} style={{ cursor: 'pointer' }}>
+      <div onClick={() => setCollapse(v => !v)} style={{ cursor: 'pointer' }}>
         {label}
       </div>
-      {expanded && children}
+      {collapse && children}
     </div>
   );
 }

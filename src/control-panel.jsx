@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GroupPanel } from './components/GroupPanel';
 import { SelectedMagnetPanel, SimSection } from './components/MagnetPanelComponents';
-import { PresetPanel } from './components/PresetPanel';
+import { PresetPanel, LoadUserPreset } from './components/PresetPanel';
 import { reframeCoordinates as _reframeCoordinates, createMagnet, magnet2Draft, perturbMagnet, resetMagnetIdCounter, tryMove, tryRotate } from './data/magnet-type';
-import { exportJson, listPresets, loadPreset } from './data/presets';
+import { exportJson, listPresets, loadPreset, parsePreset } from './data/presets';
 import { useGrouping } from './hooks/useGrouping';
 import { useKeyboardNav } from './hooks/useKeyboardNav';
 import { usePhysicsLoop } from './hooks/usePhysicsLoop';
@@ -54,7 +54,7 @@ export default function MagnetSimulator() {
 
   // ── 分组 ──────────────────────────────────────────────────────────────────
   const grouping = useGrouping({ selectedIds, setSelectedIds, keyTrapRef, stateRef });
-  const { activeGroup, groups, setNewGroupName, createGroup, getIdsInAffectedGroup, cleanupIds, resetGroups } = grouping;
+  const { activeGroup, groups, setNewGroupName, createGroup, getIdsInAffectedGroup, cleanupIds, setGroups, setActiveGroup, } = grouping;
 
   /** @type {React.RefObject<import('./physics/world').MagnetPGSWorld|null>} */
   const magnetWorldRef = useRef(null);
@@ -148,20 +148,19 @@ export default function MagnetSimulator() {
   };
 
   // ── 磁球操作 ──────────────────────────────────────────────────────────────
-  const addMagnet = () => {
-    needsSyncRef.current = true;
-    setMagnets(prev => [...prev, createMagnet({
-      pos: new THREE.Vector3((Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02, 0),
-      color: Math.random() > 0.5 ? 0x4444ff : 0xff4444
-    })]);
-    setTotalSimTime(0);
-  };
   const removeMagnet = () => {
-    const effIds = getIdsInAffectedGroup();
-    if (effIds.size === 0) return;
+    if (selectedIds.size === 0) return;
     needsSyncRef.current = true;
-    setMagnets(prev => prev.filter(m => !effIds.has(m.id)));
-    cleanupIds(effIds);
+    setMagnets(prev => prev.filter(m => !selectedIds.has(m.id)));
+    setGroups(prev => {
+      const next = {};
+      for (const [name, ids] of Object.entries(prev)) {
+        const kept = new Set([...ids].filter(id => !selectedIds.has(id)));
+        if (kept.size > 0) next[name] = kept;
+      }
+      return next;
+    });
+    cleanupIds(selectedIds);
     setSelectedIds(new Set());
     setTotalSimTime(0);
   };
@@ -189,13 +188,29 @@ export default function MagnetSimulator() {
   }
 
   const applyPreset = (name) => {
+    loadPreset(name, MAGNET_RADIUS).then(res => resetMagnets(res.magnets));
+  };
+
+  const resetMagnets = (magnets) => {
     magnetWorldRef.current?.reset();
     resetUndo();
     needsSyncRef.current = true;
     resetMagnetIdCounter(); // 确保预设加载的磁球 ID 从 0 开始连续
-    loadPreset(name, MAGNET_RADIUS).then(res => setMagnets(res.magnets));
+    setMagnets(magnets);
     setSelectedIds(new Set());
-    resetGroups();
+    setGroups({});
+    for (const m of magnets) {
+      if (m.group) {
+        setGroups(prev => {
+          const next = { ...prev };
+          if (!next[m.group]) next[m.group] = new Set();
+          next[m.group].add(m.id);
+          return next;
+        })
+      }
+    }
+    setActiveGroup(null);
+    setNewGroupName('');
     setIsSimulating(false);
     setTotalSimTime(0);
   };
@@ -238,6 +253,17 @@ export default function MagnetSimulator() {
       a.click(); URL.revokeObjectURL(a.href);
     }
   }, [magnets]);
+
+  const importMagnets = useCallback((json) => {
+    try {
+      JSON.parse(json); // 先验证 JSON 格式，避免 parsePreset 报错时丢失原有数据
+      const { magnets } = parsePreset(json, MAGNET_RADIUS);
+      if (magnets.length === 0) return;
+      resetMagnets(magnets);
+    } catch (e) {
+      alert('导入失败: ' + e.message);
+    }
+  }, []);
 
   const reframeCoordinates = () => {
     const newMagnets = _reframeCoordinates(magnets, selectedId, refYId);
@@ -283,9 +309,7 @@ export default function MagnetSimulator() {
         newIds.add(mag.id);
         newMags.push(mag);
       }
-    }
-
-    if (presets.includes(presetName)) {
+    } else if (presets.includes(presetName)) {
       const res = await loadPreset(presetName, MAGNET_RADIUS);
       for (const mag of res.magnets) {
         mag.pos.add(physPos);
@@ -293,7 +317,6 @@ export default function MagnetSimulator() {
         newMags.push(mag);
       }
     }
-
     if (newIds.size > 0) {
       setMagnets(prev => {
         const next = [...prev, ...newMags];
@@ -370,9 +393,10 @@ export default function MagnetSimulator() {
           showForceTorques={showForceTorques} setShowForceTorques={setShowForceTorques}
         >
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-            <button onClick={addMagnet} style={{ ...smallBtnStyle, flex: 1, background: '#1a3a1a', borderColor: '#2a5a2a' }}>+ 添加磁球</button>
             <button onClick={() => exportMagnets('download')} style={{ ...smallBtnStyle, flex: 1 }}>⬇ 导出</button>
             <button onClick={() => exportMagnets('copy')} style={{ ...smallBtnStyle, flex: 1 }}>📋 复制</button>
+            {/* <button onClick={addMagnet} style={{ ...smallBtnStyle, flex: 1, background: '#1a3a1a', borderColor: '#2a5a2a' }}>+ 添加磁球</button> */}
+            <LoadUserPreset importMagnets={importMagnets} />
           </div>
         </SimSection>
 

@@ -53,8 +53,7 @@ export function SimSection({
   children
 }) {
   return Collapse(
-    secStyle,
-    <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>动力学模拟</div>,
+    <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>动力学模拟参数</div>,
     <div>
       <button onClick={onToggle} style={{
         width: '100%', padding: '8px', border: 'none', borderRadius: '6px',
@@ -110,9 +109,8 @@ export function SimSection({
       </div>
 
       {children && (<>{children}</>)}
-    </div>
-    ,
-    true
+    </div>,
+    false
   );
 }
 

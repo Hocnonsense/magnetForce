@@ -73,3 +73,28 @@ export function PresetPanel({
 
   )
 }
+
+export function LoadUserPreset({ importMagnets }) {
+  return (
+    <button
+      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+      onDrop={e => {
+        e.preventDefault();
+        const file = e.dataTransfer.files?.[0];
+        if (file) { file.text().then(importMagnets); }
+        else { importMagnets(e.dataTransfer.getData('text')); }
+      }}
+      onPaste={e => {
+        const text = e.clipboardData.getData('text');
+        if (text) importMagnets(text);
+      }}
+      tabIndex={0}
+      style={{
+        ...smallBtnStyle, flex: 1, background: '#1a3a1a', borderColor: '#2a5a2a',
+        textAlign: 'center', cursor: 'pointer', outline: 'none',
+      }}
+    >
+      📥 导入 (粘贴/拖放)
+    </button>
+  )
+}

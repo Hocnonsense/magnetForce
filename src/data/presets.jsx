@@ -134,6 +134,18 @@ export function parsePresetJson(text) {
   return { name, unit, magnets };
 }
 
+export function parsePreset(text, radius_m) {
+  const { name: presetName, unit, magnets } = parsePresetJson(text);
+  const UNIT_SCALE = { m: 1, mm: 1e-3, cm: 1e-2, radius: radius_m, diameter: radius_m * 2 };
+  if (!(unit in UNIT_SCALE)) throw new Error(`Unknown unit in preset: ${unit}`);
+  const scale = UNIT_SCALE[unit];
+  return {
+    name: presetName,
+    scale,
+    magnets: applyRadius(magnets, scale)
+  };
+}
+
 /**
  * @param {string} name  preset 名（不含扩展名）
  * @param {number} radius_m
@@ -143,14 +155,8 @@ export async function loadPreset(name, radius_m = 0.0025) {
   const res = await fetch(`${import.meta.env.BASE_URL}presets/${name}.json`);
   try {
     const text = await res.text();
-    const { name: presetName, unit, magnets } = parsePresetJson(text);
-    const UNIT_SCALE = { m: 1, mm: 1e-3, cm: 1e-2, radius: radius_m, diameter: radius_m * 2 };
-    if (!(unit in UNIT_SCALE)) throw new Error(`Unknown unit in preset: ${unit}`);
-    const scale = UNIT_SCALE[unit];
-    return {
-      name: presetName || name,
-      magnets: applyRadius(magnets, scale)
-    };
+    const { name: presetName, scale, magnets } = parsePreset(text, radius_m);
+    return { name: presetName || name, magnets };
   } catch (e) {
     if (name in PRESETS) {
       console.warn(`Preset "${name}" not found as file, falling back to built-in.`);

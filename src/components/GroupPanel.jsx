@@ -31,7 +31,6 @@ export function GroupPanel({
   const hasRename = newGroupName.trim() && newGroupName.trim() !== activeGroup;
 
   return Collapse(
-    secStyle,
     <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>分组</div>,
     <div>
       <div style={{ gap: '6px', display: 'flex', flexWrap: 'wrap', ...lbl }}>

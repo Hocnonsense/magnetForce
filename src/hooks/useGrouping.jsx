@@ -12,7 +12,6 @@ import { useCallback, useEffect, useState } from 'react';
  * @property {() => void} confirmRename
  * @property {() => Set<number>} getIdsInAffectedGroup
  * @property {(deletedIds: Set<number>) => void} cleanupIds
- * @property {() => void} resetGroups
  */
 
 /**
@@ -109,13 +108,6 @@ export function useGrouping({ selectedIds, setSelectedIds, keyTrapRef, stateRef 
     });
   }, []);
 
-  /** 重置全部分组状态（applyPreset 用） */
-  const resetGroups = useCallback(() => {
-    setGroups({});
-    setActiveGroup(null);
-    setNewGroupName('');
-  }, []);
-
   // ── Ctrl+G / Ctrl+Shift+G / Ctrl+A 快捷键 ───────────────────────────
   useEffect(() => {
     const handler = (e) => {
@@ -150,6 +142,6 @@ export function useGrouping({ selectedIds, setSelectedIds, keyTrapRef, stateRef 
     newGroupName, setNewGroupName,
     getIdsInAffectedGroup,
     createGroup, deleteGroup, selectGroup, confirmRename,
-    cleanupIds, resetGroups,
+    cleanupIds,
   };
 }
