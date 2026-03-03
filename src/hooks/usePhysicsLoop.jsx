@@ -58,14 +58,6 @@ export function usePhysicsLoop(magnetWorldRef,
   const animIdRef = useRef(null);
   const stepDeltaTimeRef = useRef('');
 
-  const draftcache = {
-    pos: new Map(),
-    vel: new Map(),
-    moment: new Map(),
-    f: new Map(),
-    tau: new Map(),
-  }
-
   /** 单步物理积分，由 rAF 循环调用 */
   const physicsStep = useCallback(() => {
     const {

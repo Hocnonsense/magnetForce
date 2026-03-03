@@ -104,7 +104,7 @@ export default function MagnetSimulator() {
     if (selectedId === null) { setEditDraft(null); return; }
     const mag = magnets.find(m => m.id === selectedId);
     setEditDraft(mag ? magnet2Draft(mag) : null);
-  }, [selectedId]);
+  }, [selectedId, magnets]);
 
   // ── 键盘输入捕获 ──────────────────────────────────────────────────────────
   // 点击 3D 区域时不再自动聚焦 keyTrap，仅选择分组时聚焦
@@ -195,29 +195,26 @@ export default function MagnetSimulator() {
     loadPreset(name, MAGNET_RADIUS).then(res => resetMagnets(res.magnets));
   };
 
-  const resetMagnets = (magnets) => {
+  const resetMagnets = useCallback((magnets) => {
     magnetWorldRef.current?.reset();
     resetUndo();
     needsSyncRef.current = true;
-    resetMagnetIdCounter(); // 确保预设加载的磁球 ID 从 0 开始连续
+    resetMagnetIdCounter();
     setMagnets(magnets);
     setSelectedIds(new Set());
-    setGroups({});
+    const groups = {};
     for (const m of magnets) {
       if (m.group) {
-        setGroups(prev => {
-          const next = { ...prev };
-          if (!next[m.group]) next[m.group] = new Set();
-          next[m.group].add(m.id);
-          return next;
-        })
+        if (!groups[m.group]) groups[m.group] = new Set();
+        groups[m.group].add(m.id);
       }
     }
+    setGroups(Object.keys(groups).length > 0 ? groups : {});
     setActiveGroup(null);
     setNewGroupName('');
     setIsSimulating(false);
     setTotalSimTime(0);
-  };
+  }, [resetUndo]);
 
   const commitEdit = (field, index, value) => {
     const num = parseFloat(value);
@@ -267,7 +264,7 @@ export default function MagnetSimulator() {
     } catch (e) {
       alert('导入失败: ' + e.message);
     }
-  }, []);
+  }, [resetMagnets]);
 
   const reframeCoordinates = () => {
     const newMagnets = _reframeCoordinates(magnets, selectedId, refYId);
@@ -294,7 +291,7 @@ export default function MagnetSimulator() {
       color: m.color
     }));
     setCustomPresets(prev => ({ ...prev, [activeGroup]: { magnets: relativeMags } }));
-  }, [activeGroup, groups, magnets]);
+  }, [groups, magnets]);
 
   /** 在指定物理坐标处添加预设球组，返回新球的 id 集合 */
   const addPresetAtPosition = useCallback(async (presetName, physPos) => {
@@ -321,21 +318,22 @@ export default function MagnetSimulator() {
         newMags.push(mag);
       }
     }
-    if (newIds.size > 0) {
-      setMagnets(prev => {
-        const next = [...prev, ...newMags];
-        if (tryMove(next, newIds, new THREE.Vector3(), MAGNET_RADIUS) === null) return prev;
-        needsSyncRef.current = true;
-        pushUndo(prev); pushUndo(next);
-        histIdxRef.current = -1;
-        setSelectedIds(newIds);
-        setNewGroupName(presetName);
-        createGroup();
-        setTotalSimTime(0);
-        return next;
-      });
-    }
-  }, [customPresets, presets]);
+    if (newIds.size === 0) return;
+    // 先读当前 magnets 做碰撞检测
+    const prev = stateRef.current.magnets;
+    const next = [...prev, ...newMags];
+    if (tryMove(next, newIds, new THREE.Vector3(), MAGNET_RADIUS) === null) return;
+    // 副作用全部在外面，顺序明确
+    pushUndo(prev);
+    needsSyncRef.current = true;
+    setMagnets(next);
+    pushUndo(next);
+    histIdxRef.current = -1;
+    setSelectedIds(newIds);
+    setNewGroupName(presetName);
+    createGroup();
+    setTotalSimTime(0);
+  }, [customPresets, presets, pushUndo, createGroup]);
 
   /** 处理拖放到 3D 区域 */
   const handleDragOver = useCallback((e) => {
@@ -349,7 +347,7 @@ export default function MagnetSimulator() {
     const physPos = screenToPhysics(containerRef.current, cameraRef.current, e.clientX, e.clientY, VISUAL_SCALE);
     if (!presetName) return;
     addPresetAtPosition(presetName, physPos);
-  }, [customPresets, addPresetAtPosition]);
+  }, [addPresetAtPosition]);
 
   // ── 批量修改 ──────────────────────────────────────────────────────────────
   const batchSet = (field, value) => {
@@ -466,9 +464,8 @@ export default function MagnetSimulator() {
                   pushUndo(magnets); needsSyncRef.current = true;
                   const next = magnets.map(m => {
                     if (!ids.has(m.id)) return m;
-                    const mag = Math.sqrt(m.moment[0] ** 2 + m.moment[1] ** 2 + m.moment[2] ** 2);
                     /** @ts-ignore */
-                    return { ...m, moment: new THREE.Vector3(...val).multiplyScalar(mag) };
+                    return { ...m, moment: new THREE.Vector3(...val).normalize() };
                   });
                   pushUndo(next); histIdxRef.current = -1; setMagnets(next);
                 }} style={smallBtnStyle}>{label}</button>

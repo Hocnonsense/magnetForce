@@ -175,8 +175,18 @@ export function useThreeScene(
     const onResize = () => {
       const w = container.clientWidth || 800;
       const h = container.clientHeight || 600;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
+      const cam = cameraRef.current;
+      if (!cam) return;
+      if (cam.isPerspectiveCamera) {
+        cam.aspect = w / h;
+      } else {
+        // 正交相机：保持垂直范围不变，调整水平范围
+        const aspect = w / h;
+        const halfH = (cam.top - cam.bottom) / 2;
+        cam.left = -halfH * aspect;
+        cam.right = halfH * aspect;
+      }
+      cam.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
     window.addEventListener('resize', onResize);
@@ -298,6 +308,7 @@ export function useThreeScene(
     ringsRef.current = rings;
     transRingsRef.current = transRings;
   }, [magnets.length, showMoments, showForceTorques, ready]);
+  // 提供与磁铁格式相同数量的 meshes/arrow 对象，避免频繁创建销毁
 
   // ── 更新位置/外观 ────────────────────────────────────────────────────
   useEffect(() => {

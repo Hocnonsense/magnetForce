@@ -421,7 +421,7 @@ function updateFrictionForce(base, lambda, Ff, dir, mu, SOFT_TOLERANCE) {
  */
 function tangentBasis(n) {
   const aux = Math.abs(n.x) < 0.9 ? new Vector3(1, 0, 0) : new Vector3(0, 1, 0);
-  const t1 = aux.cross(n).normalize().negate();
+  const t1 = aux.cross(n).normalize().negate(); // 复用 aux
   const t2 = n.clone().cross(t1);
   return [n, t1, t2];
 }

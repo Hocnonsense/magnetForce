@@ -26,7 +26,7 @@ export function resetMagnetIdCounter() {
  */
 
 const REQUIRED_VEC3 = /** @type {(keyof Magnet)[]} */ (['pos', 'vel', 'moment', 'omega']);
-const OPTIONAL_VEC3 = /** @type {(keyof Magnet)[]} */ (['f', 'tau', 'fixed']);
+const OPTIONAL_VEC3 = /** @type {(keyof Magnet)[]} */ (['f', 'tau']);
 
 /** @returns {Magnet} */
 export function createMagnet(init = {}) {
@@ -212,7 +212,7 @@ export function reframeCoordinates(magnets, selectedId, refYId) {
  * 检查 movedIds 平移 delta 后是否与其他球碰撞
  * @param {Magnet[]} mags
  * @param {Vector3} delta
- * @returns {Map<string, number[]> | null} id → 新位置（物理坐标），碰撞则返回 null
+ * @returns {Map<string, Vector3> | null} id → 新位置（物理坐标），碰撞则返回 null
  */
 export function tryMove(mags, movedIds, delta, MAGNET_RADIUS) {
   const minD = MAGNET_RADIUS * 2 * 0.999;
