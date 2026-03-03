@@ -10,56 +10,41 @@ import * as THREE from 'three';
 const ANIMATE_DT = 32; // ~30fps 渲染帧间隔 (ms)
 const BOUND = 0.1;     // 位置边界 (m)
 
+
 /**
- * 物理循环 hook
+ * 物理步进 hook
  *
  * 职责：
- * 1. 持有 requestAnimationFrame 循环（渲染 + 物理步进）
- * 2. 每帧调用 magnetWorld.step()，将结果写回 setMagnets
- * 3. 通过 stateRef 读取最新参数，避免闭包捕获旧值
- * 4. 暴露 stepDeltaTimeRef（当前帧步长信息）和 totalSimTime
+ * 1. 每帧调用 magnetWorld.step()，将结果写回 setMagnets
+ * 2. 通过 stateRef 读取最新参数，避免闭包捕获旧值
+ * 3. 暴露 stepDeltaTimeRef（当前帧步长信息）和 tick() 供渲染循环调用
  *
- * @param {React.RefObject} magnetWorldRef,
- * @param {React.RefObject<{
+ * @param {{
+ *   magnetWorldRef: React.RefObject<MagnetPGSWorld|null>,
+ *   stateRef: React.RefObject<{
  *     magnets: Magnet[],
  *     isSimulating: boolean,
  *     simSpeed: number,
  *     useGravity: boolean,
- *   }>} stateRef,
- * @param {boolean} ready,
- * @param {React.RefObject<HTMLElement>} containerRef,
- * @param {React.RefObject} sceneRef,
- * @param {React.RefObject} cameraRef,
- * @param {React.RefObject} rendererRef,
- * @param {React.RefObject} controlsRef,
- * @param {React.RefObject} needsSyncRef,
- * @param {React.RefObject<Set<number>>} selectedIdsRef,
- * @param {Function} setMagnets,
- * @param {Function} setEditDraft,
- * @param {Function} setTotalSimTime,
- * @param {Function} onBeforeRender,
+ *   }>,
+ *   needsSyncRef: React.RefObject<boolean>,
+ *   selectedIdsRef: React.RefObject<Set<number>>,
+ * }} refs
+ * @param {{
+ *   setMagnets: Function,
+ *   setEditDraft: Function,
+ *   setTotalSimTime: Function,
+ *   setIsSimulating: Function,
+ * }} setters
  */
-export function usePhysicsLoop(magnetWorldRef,
-  stateRef,
-  ready,
-  containerRef,
-  sceneRef,
-  cameraRef,
-  rendererRef,
-  controlsRef,
-  needsSyncRef,
-  selectedIdsRef,
-  setMagnets,
-  setEditDraft,
-  setTotalSimTime,
-  setIsSimulating,
-  onBeforeRender,  // ← 新增
+export function usePhysicsStep(
+  { magnetWorldRef, stateRef, needsSyncRef, selectedIdsRef },
+  { setMagnets, setEditDraft, setTotalSimTime, setIsSimulating },
 ) {
-  const animIdRef = useRef(null);
   const stepDeltaTimeRef = useRef('');
 
-  /** 单步物理积分，由 rAF 循环调用 */
-  const physicsStep = useCallback(() => {
+  /** 单步物理积分，由渲染循环定时调用 */
+  const tick = useCallback(() => {
     const {
       magnets: currentMagnets,
       isSimulating: running,
@@ -91,6 +76,7 @@ export function usePhysicsLoop(magnetWorldRef,
 
     setMagnets(bounded);
     needsSyncRef.current = true;
+    // 后续添加: 步进模拟, 每次运行结束后 setIsSimulating(false)，等待下一次触发
 
     // 同批次更新 editDraft，避免 magnets useEffect 连锁触发, 仅当选择一个时更新编辑面板
     const selIds = selectedIdsRef.current;
@@ -108,7 +94,37 @@ export function usePhysicsLoop(magnetWorldRef,
     selectedIdsRef, setMagnets, setEditDraft, setTotalSimTime,
   ]);
 
-  // rAF 循环：渲染 + 定时触发物理步
+  return { tick, stepDeltaTimeRef };
+}
+
+/**
+ * 渲染循环 hook
+ *
+ * 职责：
+ * 1. 持有 requestAnimationFrame 循环
+ * 2. 每帧更新 OrbitControls、调用 onBeforeRender 回调
+ * 3. 按 ANIMATE_DT 间隔触发物理步进（tick）
+ * 4. 渲染 Three.js 场景
+ *
+ * @param {{
+ *   containerRef: React.RefObject<HTMLElement>,
+ *   sceneRef: React.RefObject,
+ *   cameraRef: React.RefObject,
+ *   rendererRef: React.RefObject,
+ *   controlsRef: React.RefObject,
+ * }} canvas
+ * @param {{
+ *   ready: boolean,
+ *   tick: () => void,
+ *   onBeforeRender: (() => void) | null,
+ * }} options
+ */
+export function useRenderLoop(
+  { containerRef, sceneRef, cameraRef, rendererRef, controlsRef },
+  { ready, tick, onBeforeRender },
+) {
+  const animIdRef = useRef(null);
+
   useEffect(() => {
     const container = containerRef.current;
     const scene = sceneRef.current;
@@ -122,20 +138,17 @@ export function usePhysicsLoop(magnetWorldRef,
     const animate = (time) => {
       animIdRef.current = requestAnimationFrame(animate);
       if (time - lastTime > ANIMATE_DT) {
-        physicsStep();
+        tick();
         lastTime = time;
       }
       controls?.update();
-      onBeforeRender?.();   // ← 每帧调用
+      onBeforeRender?.();
       renderer.render(scene, cameraRef.current);
-      //setIsSimulating(false); // 物理步完成后重置 simulating 状态，等待下一次触发
     };
 
     animIdRef.current = requestAnimationFrame(animate);
     return () => {
       cancelAnimationFrame(animIdRef.current);
     };
-  }, [ready, physicsStep, containerRef, sceneRef, cameraRef, rendererRef, controlsRef]);
-
-  return { stepDeltaTimeRef };
+  }, [ready, tick, containerRef, sceneRef, cameraRef, rendererRef, controlsRef, onBeforeRender]);
 }

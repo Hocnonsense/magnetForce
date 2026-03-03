@@ -92,9 +92,8 @@ export class MagnetPGSWorld {
     );
     // 5. 自适应时间步（固定球跳过积分）
     const { newPos, newVel, safedt, reason } = safeMove(
-      fixedPos, constrainedForces, constrainedVel,
-      this.params.mass, DIST - this.params.shellThickness,
-      dt, fixedFlags
+      { positions: fixedPos, forces: constrainedForces, velocities: constrainedVel, fixedFlags },
+      { mass: this.params.mass, dist: DIST - this.params.shellThickness, dt }
     );
 
     // 6. 后处理接触约束（修正重叠）

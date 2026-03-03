@@ -5,15 +5,14 @@ import { solveCollisionTime } from './solver';
  * 这一步用于约束磁铁没有发生碰撞,
  * 首先安全的时间步长应当满足所有球对在该时间步内不会发生碰撞（即距离不小于 2R - shellThickness）,
  * 其次在该时间步内，所有非固定球的位移都不会超过半径的一半.
- * @param {Vector3[]} positions
- * @param {Vector3[]} forces
- * @param {Vector3[]} velocities
- * @param {number} mass
- * @param {number} dist = 2R - shellThickness
- * @param {number} dt
+ * @param {{positions: Vector3[], forces: Vector3[], velocities: Vector3[], fixedFlags: boolean[]}} states
+ * @param {{ mass: number, dist: number, dt: number}} params
+ * dist = 2R - shellThickness
  * @returns {{newPos: Vector3[], newVel: Vector3[], safedt: number, reason: string}}
  */
-export function safeMove(positions, forces, velocities, mass, dist, dt, fixedFlags = null) {
+export function safeMove(
+  { positions, forces, velocities, fixedFlags }, { mass, dist, dt }
+) {
   if (dt < 1e-12) {
     return { newPos: positions.map(p => p.clone()), newVel: velocities.map(v => v.clone()), safedt: 0, reason: 'zero delta time' };
   }

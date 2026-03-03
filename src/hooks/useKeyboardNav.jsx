@@ -69,7 +69,6 @@ export function useKeyboardNav(
       setMagnets(prev => {
         const newPos = tryMove(prev, activeIds, delta, MAGNET_RADIUS);
         if (!newPos) return prev;
-        needsSyncRef.current = true;
         return prev.map(m => {
           if (!activeIds.has(m.id)) return m;
           return { ...m, pos: newPos.get(m.id) };
@@ -83,7 +82,6 @@ export function useKeyboardNav(
       setMagnets(prev => {
         const newPos = tryRotate(prev, activeIds, center, q, MAGNET_RADIUS);
         if (!newPos) return prev;
-        needsSyncRef.current = true;
         return prev.map(m => {
           if (!activeIds.has(m.id)) return m;
           const newM = newPos.get(m.id);

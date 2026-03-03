@@ -1,17 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GroupPanel } from './components/GroupPanel';
-import { SelectedMagnetPanel, SimSection } from './components/MagnetPanelComponents';
+import { SelectedMagnetsPanel, SelectedMagnetPanel, SimControls, CoordinateTransformPanel, CheckboxRow } from './components/MagnetPanelComponents';
 import { PresetPanel, LoadUserPreset } from './components/PresetPanel';
 import { reframeCoordinates as _reframeCoordinates, createMagnet, magnet2Draft, perturbMagnet, resetMagnetIdCounter, tryMove, tryRotate } from './data/magnet-type';
 import { exportJson, listPresets, loadPreset, parsePreset } from './data/presets';
 import { useGrouping } from './hooks/useGrouping';
 import { useKeyboardNav } from './hooks/useKeyboardNav';
-import { usePhysicsLoop } from './hooks/usePhysicsLoop';
+import { usePhysicsStep, useRenderLoop } from './hooks/usePhysicsLoop';
 import { screenToPhysics, useThreeScene } from './hooks/useThreeScene';
 import { useUndoHistory } from './hooks/useUndoHistory';
 import initMagnetWorld from './physics/world';
-import { labelStyle, sectionStyle, smallBtnStyle } from './styles';
+import { labelStyle, sectionStyle, smallBtnStyle, Collapse } from './styles';
 import { alignGroupByPCA, getCenter } from './utils/coordinates';
 
 // Simulation constants
@@ -55,10 +55,10 @@ export default function MagnetSimulator() {
     _setMagnets(prev => {
       const next = typeof update === 'function' ? update(prev) : update;
       stateRef.current.magnets = next;
+      needsSyncRef.current = true;
       return next;
     });
   }, []);
-
 
   // ── 分组 ──────────────────────────────────────────────────────────────────
   const grouping = useGrouping({ selectedIds, setSelectedIds, keyTrapRef, stateRef });
@@ -83,7 +83,6 @@ export default function MagnetSimulator() {
     getMagnets: () => stateRef.current.magnets,
     selectedId,
     onApplySnap: (snap) => {
-      needsSyncRef.current = true;
       setMagnets(snap);
       const mag = snap.find(m => m.id === selectedId);
       if (mag) setEditDraft(magnet2Draft(mag));
@@ -100,11 +99,13 @@ export default function MagnetSimulator() {
     VISUAL_RADIUS, VISUAL_SCALE, RING_PX);
 
   // ── 物理循环 ──────────────────────────────────────────────────────────────
-  const { stepDeltaTimeRef } = usePhysicsLoop(
-    magnetWorldRef, stateRef, ready,
-    containerRef, sceneRef, cameraRef, rendererRef, controlsRef,
-    needsSyncRef, selectedIdsRef,
-    setMagnets, setEditDraft, setTotalSimTime, setIsSimulating, updateRings
+  const { tick, stepDeltaTimeRef } = usePhysicsStep(
+    { magnetWorldRef, stateRef, needsSyncRef, selectedIdsRef },
+    { setMagnets, setEditDraft, setTotalSimTime, setIsSimulating },
+  );
+  useRenderLoop(
+    { containerRef, sceneRef, cameraRef, rendererRef, controlsRef },
+    { ready, tick, onBeforeRender: updateRings },
   );
 
   // editDraft 随选中同步（模拟中由 physicsStep 直接更新）
@@ -162,7 +163,6 @@ export default function MagnetSimulator() {
   // ── 磁球操作 ──────────────────────────────────────────────────────────────
   const removeMagnet = () => {
     if (selectedIds.size === 0) return;
-    needsSyncRef.current = true;
     setMagnets(prev => prev.filter(m => !selectedIds.has(m.id)));
     cleanupIds(selectedIds);
     setSelectedIds(new Set());
@@ -182,7 +182,6 @@ export default function MagnetSimulator() {
     setMagnets(prev => {
       const newPos = tryRotate(prev, ids, center, q, MAGNET_RADIUS);
       if (!newPos) return prev;
-      needsSyncRef.current = true;
       return prev.map(m => {
         if (!ids.has(m.id)) return m;
         const newM = newPos.get(m.id);
@@ -198,7 +197,6 @@ export default function MagnetSimulator() {
   const resetMagnets = useCallback((magnets) => {
     magnetWorldRef.current?.reset();
     resetUndo();
-    needsSyncRef.current = true;
     resetMagnetIdCounter();
     setMagnets(magnets);
     setSelectedIds(new Set());
@@ -232,7 +230,6 @@ export default function MagnetSimulator() {
     });
     pushUndo(newMagnets);
     histIdxRef.current = -1;
-    needsSyncRef.current = true;
     setMagnets(newMagnets);
     setEditDraft(d => {
       if (!d) return d;
@@ -270,7 +267,7 @@ export default function MagnetSimulator() {
     const newMagnets = _reframeCoordinates(magnets, selectedId, refYId);
     if (!newMagnets) return;
     pushUndo(magnets); pushUndo(newMagnets);
-    needsSyncRef.current = true; setMagnets(newMagnets);
+    setMagnets(newMagnets);
   };
 
   const toggleSimulation = () => {
@@ -325,7 +322,6 @@ export default function MagnetSimulator() {
     if (tryMove(next, newIds, new THREE.Vector3(), MAGNET_RADIUS) === null) return;
     // 副作用全部在外面，顺序明确
     pushUndo(prev);
-    needsSyncRef.current = true;
     setMagnets(next);
     pushUndo(next);
     histIdxRef.current = -1;
@@ -354,7 +350,6 @@ export default function MagnetSimulator() {
     const ids = getIdsInActiveGroup();
     if (ids.size === 0) return;
     pushUndo(magnets);
-    needsSyncRef.current = true;
     const next = magnets.map(m => ids.has(m.id) ? { ...m, [field]: value } : m);
     pushUndo(next); histIdxRef.current = -1;
     setMagnets(next);
@@ -377,30 +372,36 @@ export default function MagnetSimulator() {
 
         <h1 style={{ fontSize: '18px', margin: 0, color: '#fff', borderBottom: '1px solid #333', paddingBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '24px' }}>🧲</span> NdFeB 磁力球模拟
-          <span style={{ fontSize: '10px', color: '#666', marginLeft: 'auto' }}>PGS</span>
         </h1>
 
-        <SimSection
-          isSimulating={isSimulating} simSpeed={simSpeed}
-          stepDeltaTimeRef={stepDeltaTimeRef} totalSimTime={totalSimTime}
-          useGravity={useGravity}
-          magnets={magnets} selectedId={selectedId} refYId={refYId} setRefYId={setRefYId}
-          onToggle={toggleSimulation}
-          onResetVel={() => { needsSyncRef.current = true; setMagnets(prev => prev.map(m => ({ ...m, vel: new THREE.Vector3(), omega: new THREE.Vector3() }))); }}
-          onPerturb={() => { needsSyncRef.current = true; setMagnets(prev => prev.map(m => perturbMagnet(m, 0.2 * MAGNET_RADIUS))); }}
-          onReframe={reframeCoordinates}
-          onSimSpeedChange={setSimSpeed}
-          onGravityChange={setUseGravity}
-          showMoments={showMoments} setShowMoments={setShowMoments}
-          showForceTorques={showForceTorques} setShowForceTorques={setShowForceTorques}
+        <Collapse
+          label={<div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>动力学模拟参数</div>}
         >
+          <SimControls
+            isSimulating={isSimulating} simSpeed={simSpeed}
+            stepDeltaTimeRef={stepDeltaTimeRef} totalSimTime={totalSimTime}
+            onToggle={toggleSimulation}
+            onResetVel={() => { needsSyncRef.current = true; setMagnets(prev => prev.map(m => ({ ...m, vel: new THREE.Vector3(), omega: new THREE.Vector3() }))); }}
+            onPerturb={() => { needsSyncRef.current = true; setMagnets(prev => prev.map(m => perturbMagnet(m, 0.1 * MAGNET_RADIUS))); }}
+            onSimSpeedChange={setSimSpeed}
+          />
+          <CoordinateTransformPanel
+            magnets={magnets} selectedId={selectedId}
+            refYId={refYId} setRefYId={setRefYId}
+            onReframe={reframeCoordinates}
+          />
+          {/* 显示选项面板：重力、磁矩、力矩的开关 */}
+          <div style={{ display: 'flex', gap: '12px', marginTop: '10px', flexWrap: 'wrap' }}>
+            <CheckboxRow label="重力 (y 方向)" checked={useGravity} onChange={setUseGravity} />
+            <CheckboxRow label="显示磁矩" checked={showMoments} onChange={setShowMoments} />
+            <CheckboxRow label="显示力矩" checked={showForceTorques} onChange={setShowForceTorques} />
+          </div>
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
             <button onClick={() => exportMagnets('download')} style={{ ...smallBtnStyle, flex: 1 }}>⬇ 导出</button>
             <button onClick={() => exportMagnets('copy')} style={{ ...smallBtnStyle, flex: 1 }}>📋 复制</button>
-            {/* <button onClick={addMagnet} style={{ ...smallBtnStyle, flex: 1, background: '#1a3a1a', borderColor: '#2a5a2a' }}>+ 添加磁球</button> */}
             <LoadUserPreset importMagnets={importMagnets} />
           </div>
-        </SimSection>
+        </Collapse>
 
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
           <button onClick={() => setCameraView('x')} style={smallBtnStyle}>YZ面</button>
@@ -417,7 +418,6 @@ export default function MagnetSimulator() {
           grouping={grouping}
           selectedIds={selectedIds}
           onDeselect={() => { grouping.setActiveGroup(null); grouping.setNewGroupName(''); }}
-          onRemoveMagnet={removeMagnet}
           adsorbToAxis={adsorbToAxis}
           saveGroupAsPreset={saveGroupAsPreset}
           presetPanel={<PresetPanel
@@ -426,70 +426,65 @@ export default function MagnetSimulator() {
             setCustomPresets={setCustomPresets}
             applyPreset={applyPreset}
           />}
-        >
-        </GroupPanel>
+        />
         {/* Presets */}
 
+        {/* 选择面板 */}
+        <SelectedMagnetsPanel
+          selectedIds={selectedIds}
+          selectedMag={magnets.find(m => m.id === selectedId)}
+          isSimulating={isSimulating}
+          onToggle={toggleSimulation}
+          onToggleFixed={() => {
+            setMagnets(prev => prev.map(m => m.id === selectedId ? { ...m, fixed: !m.fixed } : m));
+          }}
+          onRemove={removeMagnet}
+        >
+          {/* ── 单个修改 ── */}
+          {selectedId !== null && (
+            <SelectedMagnetPanel
+              isSimulating={isSimulating}
+              editDraft={editDraft}
+              setEditDraft={setEditDraft}
+              onCommit={commitEdit}
+            />
+          )}
+          {/* ── 批量修改 ── */}
+          {selectedIds.size > 1 && (
+            <>
+              <div style={labelStyle}>批量修改 ({activeIds.size})</div>
+              <div style={{ fontSize: '10px', color: '#666', marginBottom: '4px' }}>颜色</div>
+              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                {["#ff4444", "#4444ff", "#44ff44", "#ffdd00", "#ff44ff", "#44ffff", "#ff8800", "#8844ff"].map(c => (
+                  <button key={c} onClick={() => batchSet('color', c)} style={{
+                    width: '22px', height: '22px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer',
+                    background: c,
+                  }} />
+                ))}
+                <input type="color" onChange={e => batchSet('color', parseInt(e.target.value.slice(1), 16))}
+                  style={{ width: '22px', height: '22px', padding: 0, border: 'none', borderRadius: '4px', cursor: 'pointer' }} />
+              </div>
+              <div style={{ fontSize: '10px', color: '#666', marginTop: '6px', marginBottom: '4px' }}>磁矩方向</div>
+              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                {[['+X', [1, 0, 0]], ['−X', [-1, 0, 0]], ['+Y', [0, 1, 0]], ['−Y', [0, -1, 0]], ['+Z', [0, 0, 1]], ['−Z', [0, 0, -1]]].map(([label, val]) => (
+                  /** @ts-ignore */
+                  <button key={label} onClick={() => {
+                    const ids = getIdsInActiveGroup();
+                    pushUndo(magnets);
+                    const next = magnets.map(m => {
+                      if (!ids.has(m.id)) return m;
+                      /** @ts-ignore */
+                      return { ...m, moment: new THREE.Vector3(...val).normalize() };
+                    });
+                    pushUndo(next); histIdxRef.current = -1; setMagnets(next);
+                  }} style={smallBtnStyle}>{label}</button>
+                ))}
+              </div>
+            </>
+          )}
+        </SelectedMagnetsPanel>
 
-        {/* ── 批量修改 ── */}
-        {activeIds.size > 1 && (
-          <div style={sectionStyle}>
-            <div style={labelStyle}>批量修改 ({activeIds.size})</div>
-            <div style={{ fontSize: '10px', color: '#666', marginBottom: '4px' }}>颜色</div>
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '8px' }}>
-              {["#ff4444", "#4444ff", "#44ff44", "#ffdd00", "#ff44ff", "#44ffff", "#ff8800", "#8844ff"].map(c => (
-                <button key={c} onClick={() => batchSet('color', c)} style={{
-                  width: '22px', height: '22px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer',
-                  background: c,
-                }} />
-              ))}
-              <input type="color" onChange={e => batchSet('color', parseInt(e.target.value.slice(1), 16))}
-                style={{ width: '22px', height: '22px', padding: 0, border: 'none', borderRadius: '4px', cursor: 'pointer' }} />
-            </div>
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-              <button onClick={() => batchSet('vel', new THREE.Vector3())} style={smallBtnStyle}>清零速度</button>
-              <button onClick={() => batchSet('omega', new THREE.Vector3())} style={smallBtnStyle}>清零角速度</button>
-              <button onClick={() => {
-                const ids = getIdsInActiveGroup();
-                needsSyncRef.current = true;
-                setMagnets(prev => prev.map(m => ids.has(m.id) ? { ...m, fixed: !m.fixed } : m));
-              }} style={smallBtnStyle}>切换固定</button>
-            </div>
-            <div style={{ fontSize: '10px', color: '#666', marginTop: '6px', marginBottom: '4px' }}>磁矩方向</div>
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-              {[['+X', [1, 0, 0]], ['−X', [-1, 0, 0]], ['+Y', [0, 1, 0]], ['−Y', [0, -1, 0]], ['+Z', [0, 0, 1]], ['−Z', [0, 0, -1]]].map(([label, val]) => (
-                /** @ts-ignore */
-                <button key={label} onClick={() => {
-                  const ids = getIdsInActiveGroup();
-                  pushUndo(magnets); needsSyncRef.current = true;
-                  const next = magnets.map(m => {
-                    if (!ids.has(m.id)) return m;
-                    /** @ts-ignore */
-                    return { ...m, moment: new THREE.Vector3(...val).normalize() };
-                  });
-                  pushUndo(next); histIdxRef.current = -1; setMagnets(next);
-                }} style={smallBtnStyle}>{label}</button>
-              ))}
-            </div>
-          </div>
-        )}
 
-        {/* 单选详细面板 */}
-        {selectedId !== null && (
-          <SelectedMagnetPanel
-            selectedId={selectedId}
-            selectedMag={magnets.find(m => m.id === selectedId)}
-            isSimulating={isSimulating}
-            editDraft={editDraft} setEditDraft={setEditDraft}
-            onToggle={toggleSimulation}
-            onToggleFixed={() => {
-              needsSyncRef.current = true;
-              setMagnets(prev => prev.map(m => m.id === selectedId ? { ...m, fixed: !m.fixed } : m));
-            }}
-            onRemove={removeMagnet}
-            onCommit={commitEdit}
-          />
-        )}
       </div>
 
       {/* 3D View */}

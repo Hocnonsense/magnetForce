@@ -12,7 +12,6 @@ import { sectionStyle, labelStyle, chipButtonStyle, smallBtnStyle, Collapse } fr
  * @param {GroupingState} props.grouping
  * @param {Set<number>} props.selectedIds
  * @param {() => void} props.onDeselect       - 取消选择（清空 activeGroup + newGroupName）
- * @param {() => void} props.onRemoveMagnet
  * @param {() => void} props.adsorbToAxis
  * @param {(string) => void} props.saveGroupAsPreset
  * @param {import('react').ReactNode} [props.presetPanel] - 可选子元素（如扩展操作按钮）
@@ -21,7 +20,6 @@ export function GroupPanel({
   grouping,
   selectedIds,
   onDeselect,
-  onRemoveMagnet,
   adsorbToAxis,
   saveGroupAsPreset,
   presetPanel, // 👈 新增：接收子元素
@@ -115,31 +113,6 @@ export function GroupPanel({
       {activeGroup && (
         <div style={{ fontSize: '10px', color: '#555', marginTop: '6px' }}>
           ↑↓←→ 移动 · PgUp/Home PgDn/End Tab/Shift+Tab 旋转
-        </div>
-      )}
-
-      {/* ── 选择信息行 ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', ...labelStyle, marginTop: '8px' }}>
-        <span>
-          {selectedIds.size > 0 ? `Shift+单击多选` : '单击选择'}
-          ({selectedIds.size}){activeGroup && ` · 「${activeGroup}」`}
-        </span>
-        {selectedIds.size > 0 && (
-          <span
-            onClick={onRemoveMagnet}
-            style={{ fontSize: '10px', color: '#ff6b6b', cursor: 'pointer', marginLeft: 'auto' }}
-          >
-            删除
-          </span>
-        )}
-      </div>
-
-      {/* ── 选中 ID 标签 ── */}
-      {selectedIds.size > 0 && (
-        <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', marginBottom: '6px' }}>
-          {[...selectedIds].map(id => (
-            <span key={id} style={{ padding: '0 5px', borderRadius: '3px', fontSize: '10px', background: 'rgba(68,136,255,0.15)', border: '1px solid rgba(68,136,255,0.3)', color: '#8ab4f8' }}>#{id}</span>
-          ))}
         </div>
       )}
 
