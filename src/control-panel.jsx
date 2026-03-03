@@ -156,14 +156,6 @@ export default function MagnetSimulator() {
     if (selectedIds.size === 0) return;
     needsSyncRef.current = true;
     setMagnets(prev => prev.filter(m => !selectedIds.has(m.id)));
-    setGroups(prev => {
-      const next = {};
-      for (const [name, ids] of Object.entries(prev)) {
-        const kept = new Set([...ids].filter(id => !selectedIds.has(id)));
-        if (kept.size > 0) next[name] = kept;
-      }
-      return next;
-    });
     cleanupIds(selectedIds);
     setSelectedIds(new Set());
     setTotalSimTime(0);

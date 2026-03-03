@@ -30,9 +30,10 @@ export function GroupPanel({
     createGroup, selectGroup, deleteGroup, confirmRename } = grouping;
   const hasRename = newGroupName.trim() && newGroupName.trim() !== activeGroup;
 
-  return Collapse(
-    <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>分组</div>,
-    <div>
+  return (
+    <Collapse
+      label={<div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>分组</div>}
+    >
       <div style={{ gap: '6px', display: 'flex', flexWrap: 'wrap', ...lbl }}>
         {selectedIds.size > 1 && (
           <button onClick={createGroup} style={{ ...smallBtnStyle, color: '#6bd5ff' }}>
@@ -150,7 +151,6 @@ export function GroupPanel({
           <div className="group-panel-footer">{presetPanel}</div>
         </div>
       )}
-    </div>,
-    true
+    </Collapse>
   );
 }

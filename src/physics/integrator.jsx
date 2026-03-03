@@ -21,13 +21,14 @@ export function safeMove(positions, forces, velocities, mass, dist, dt, fixedFla
   const n = positions.length;
   const accels = forces.map((f, i) => f.clone().multiplyScalar((+!_fixedFlags[i]) / mass));
   let safedt = dt, reason = 'max delta time';
-  const d0 = new Vector3(), dv = new Vector3(); // 复用的临时变量
+  const d0 = new Vector3(), dv = new Vector3(), da_2 = new Vector3(); // 复用的临时变量
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
       if (_fixedFlags[i] && _fixedFlags[j]) continue;
       d0.copy(positions[j]).sub(positions[i]);
       dv.copy(velocities[j]).sub(velocities[i]);
-      const tc = solveCollisionTime(d0, dv, accels[i], accels[j], dist, safedt); // 需要保证 accels[i] 和 accels[j] 不会被修改
+      da_2.copy(accels[j]).sub(accels[i]).multiplyScalar(0.5);
+      const tc = solveCollisionTime(d0, dv, da_2, dist, safedt);
       if (tc !== null && tc < safedt) {
         safedt = Math.max(tc - 1e-12, 0);
         reason = `collision between ${i} and ${j}`;

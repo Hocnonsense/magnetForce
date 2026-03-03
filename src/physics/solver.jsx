@@ -185,7 +185,7 @@ export function rollingFrictionTorques(contacts, velocities, forceLambda, radius
     // 对球i：滚动方向使其表面速度与vt同向 → 力矩阻碍这个滚动
     const vtHat = vt.multiplyScalar(1 / vtLen);
     // 滚动轴 = normal × vtHat（右手定则）
-    const rollAxis = vRel.crossVectors(normal, vtHat);
+    const rollAxis = vRel.copy(normal).cross(vtHat);
 
     if (!_fixedFlags[i]) {
       // 球i的滚动力矩：阻碍其朝vt方向的表面运动
@@ -417,7 +417,7 @@ function updateFrictionForce(base, lambda, Ff, dir, mu, SOFT_TOLERANCE) {
 /**
  * 为法向量构造正交切向基
  * @param {Vector3} n - 单位法向量
- * @returns {[Vector3, Vector3, Vector3]} [t1, t2]
+ * @returns {[Vector3, Vector3, Vector3]} [n, t1, t2], 使用时需保证这些基向量不会被修改
  */
 function tangentBasis(n) {
   const aux = Math.abs(n.x) < 0.9 ? new Vector3(1, 0, 0) : new Vector3(0, 1, 0);
@@ -705,16 +705,15 @@ export function solveVelocityConstraints(cVels, contacts, _fixedFlags, SOFT_TOLE
  *
  * @param {Vector3} d0 初始相对位置 (p_j - p_i)
  * @param {Vector3} dv 相对速度 (v_j - v_i)
- * @param {Vector3} a1 球 i 的加速度
- * @param {Vector3} a2 球 j 的加速度
+ * @param {Vector3} da_2 球 j 的加速度减去球 i 的加速度的一半，即 C = (a_j - a_i) / 2
  * @param {number} R 目标距离
  * @param {number} maxT 最大时间
  * @returns {number|null}
  */
 export function solveCollisionTime(
-  d0, dv, a1, a2, R, maxT, SOFT_TOLERANCE = 1e-7
+  d0, dv, da_2, R, maxT, SOFT_TOLERANCE = 1e-7
 ) {
-  const C = a2.clone().sub(a1).multiplyScalar(0.5);
+  const C = da_2;
   const c0 = d0.dot(d0) - R * R;
   if (c0 <= 0) return 0;  // 已接触
   const c1 = 2 * d0.dot(dv);

@@ -52,9 +52,10 @@ export function SimSection({
   showMoments, showForceTorques, setShowMoments, setShowForceTorques,
   children
 }) {
-  return Collapse(
-    <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>动力学模拟参数</div>,
-    <div>
+  return (
+    <Collapse
+      label={<div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>动力学模拟参数</div>}
+    >
       <button onClick={onToggle} style={{
         width: '100%', padding: '8px', border: 'none', borderRadius: '6px',
         color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', marginBottom: '10px',
@@ -109,8 +110,7 @@ export function SimSection({
       </div>
 
       {children && (<>{children}</>)}
-    </div>,
-    false
+    </Collapse>
   );
 }
 
