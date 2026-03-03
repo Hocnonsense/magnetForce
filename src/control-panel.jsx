@@ -82,9 +82,9 @@ export default function MagnetSimulator() {
     },
   });
 
-  const { meshesRef, showMoments, showForceTorques, setShowMoments, setShowForceTorques } = useThreeScene(
+  const { meshesRef, showMoments, showForceTorques, updateRings, setShowMoments, setShowForceTorques } = useThreeScene(
     { containerRef, sceneRef, cameraRef, rendererRef, controlsRef },
-    { magnets, selectedIds, activeGroup, groups, ready, getIdsInAffectedGroup, keyTrapRef },
+    { magnets, selectedIds, ready, getIdsInAffectedGroup, keyTrapRef },
     VISUAL_RADIUS, VISUAL_SCALE, RING_PX);
 
   // ── 物理循环 ──────────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ export default function MagnetSimulator() {
     magnetWorldRef, stateRef, ready,
     containerRef, sceneRef, cameraRef, rendererRef, controlsRef,
     needsSyncRef, selectedIdsRef,
-    setMagnets, setEditDraft, setTotalSimTime, setIsSimulating
+    setMagnets, setEditDraft, setTotalSimTime, setIsSimulating, updateRings
   );
 
   // editDraft 随选中同步（模拟中由 physicsStep 直接更新）

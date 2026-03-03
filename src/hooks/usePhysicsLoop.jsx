@@ -37,6 +37,7 @@ const BOUND = 0.1;     // 位置边界 (m)
  * @param {Function} setMagnets,
  * @param {Function} setEditDraft,
  * @param {Function} setTotalSimTime,
+ * @param {Function} onBeforeRender,
  */
 export function usePhysicsLoop(magnetWorldRef,
   stateRef,
@@ -52,6 +53,7 @@ export function usePhysicsLoop(magnetWorldRef,
   setEditDraft,
   setTotalSimTime,
   setIsSimulating,
+  onBeforeRender,  // ← 新增
 ) {
   const animIdRef = useRef(null);
   const stepDeltaTimeRef = useRef('');
@@ -132,6 +134,7 @@ export function usePhysicsLoop(magnetWorldRef,
         lastTime = time;
       }
       controls?.update();
+      onBeforeRender?.();   // ← 每帧调用
       renderer.render(scene, camera);
       //setIsSimulating(false); // 物理步完成后重置 simulating 状态，等待下一次触发
     };

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { reframeCoordinates as _reframeCoordinates } from '../data/magnet-type';
@@ -43,15 +43,13 @@ export function screenToPhysics(container, camera, clientX, clientY, VISUAL_SCAL
  * @param {Object} State
  * @param {Magnet[]} State.magnets,
  * @param {Set<number>} State.selectedIds,
- * @param {string|null} State.activeGroup,
- * @param {Object} State.groups,
  * @param {boolean} State.ready,
  * @param {Function} State.getIdsInAffectedGroup,
  * @param {React.RefObject<HTMLElement>} State.keyTrapRef,
  */
 export function useThreeScene(
   { containerRef, sceneRef, cameraRef, rendererRef, controlsRef },
-  { magnets, selectedIds, activeGroup, groups, ready, getIdsInAffectedGroup, keyTrapRef },
+  { magnets, selectedIds, ready, getIdsInAffectedGroup, keyTrapRef },
   VISUAL_RADIUS, VISUAL_SCALE, RING_PX
 ) {
   const meshesRef = useRef([]);
@@ -59,6 +57,7 @@ export function useThreeScene(
   const forceArrowsRef = useRef([]);
   const torqueArrowsRef = useRef([]);
   const ringsRef = useRef([]);
+  const transRingsRef = useRef([]);
   const [showMoments, setShowMoments] = useState(true);
   const [showForceTorques, setShowForceTorques] = useState(true);
 
@@ -155,7 +154,7 @@ export function useThreeScene(
       // ArrowHelper 是 Group，递归子对象
       if (o.children) o.children.forEach(disposeObj);
     };
-    [...meshesRef.current, ...arrowsRef.current, ...forceArrowsRef.current, ...torqueArrowsRef.current, ...ringsRef.current]
+    [...meshesRef.current, ...arrowsRef.current, ...forceArrowsRef.current, ...torqueArrowsRef.current, ...ringsRef.current, ...transRingsRef.current]
       .forEach(disposeObj);
 
     const dummyDir = new THREE.Vector3(0, 1, 0);
@@ -164,6 +163,7 @@ export function useThreeScene(
     const forceArrows = [];
     const torqueArrows = [];
     const rings = [];
+    const transRings = [];
 
     magnets.forEach(mag => {
       // Sphere
@@ -183,14 +183,27 @@ export function useThreeScene(
       // 白圈（Torus，初始不可见）
       const ringGeo = new THREE.TorusGeometry(VISUAL_RADIUS * 1.12, 0.02, 16, 64);
       const ringMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.85,
-        depthTest: false,
+        color: 0xffffff,
+        depthTest: true,   // ← 必须 true（默认值）
+        depthWrite: true,   // ← 必须 true
+        transparent: false,
+        opacity: 0.85,
       });
       const ring = new THREE.Mesh(ringGeo, ringMat);
       ring.visible = false;
       ring.renderOrder = 999;
       scene.add(ring);
       rings.push(ring);
+      // 显示在最上层, 半透明
+      const transsRingMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.35,
+        depthTest: false,
+      });
+      const transRing = new THREE.Mesh(ringGeo, transsRingMat);
+      transRing.visible = false;
+      transRing.renderOrder = 1000;
+      scene.add(transRing);
+      transRings.push(transRing);
 
       if (showMoments) {
         const arrow = new THREE.ArrowHelper(
@@ -227,9 +240,10 @@ export function useThreeScene(
     forceArrowsRef.current = forceArrows;
     torqueArrowsRef.current = torqueArrows;
     ringsRef.current = rings;
+    transRingsRef.current = transRings;
   }, [magnets.length, showMoments, showForceTorques, ready]);
 
-  // ── 更新位置/外观/白圈 ────────────────────────────────────────────────────
+  // ── 更新位置/外观 ────────────────────────────────────────────────────
   useEffect(() => {
     const camera = cameraRef.current;
     const renderer = rendererRef.current;
@@ -239,8 +253,6 @@ export function useThreeScene(
     const arrows = arrowsRef.current;
     const forceArrows = forceArrowsRef.current;
     const torqueArrows = torqueArrowsRef.current;
-    const ringMeshes = ringsRef.current;
-    const groupIds = getIdsInAffectedGroup();
 
     magnets.forEach((mag, idx) => {
       const origin = mag.pos.clone().multiplyScalar(VISUAL_SCALE);
@@ -249,25 +261,6 @@ export function useThreeScene(
       if (mesh) {
         mesh.position.copy(origin);
         mesh.material.emissiveIntensity = selectedIds.has(mag.id) ? 0.4 : 0.15;
-      }
-      // 白圈
-      const ring = ringMeshes[idx];
-      if (ring) {
-        const sel = groupIds.has(mag.id);
-        ring.visible = sel;
-        if (ring.visible) {
-          ring.position.copy(origin);
-          ring.lookAt(camera.position);
-          // 固定像素宽度 → 动态世界宽度
-          const dist = camera.position.distanceTo(origin);
-          const fov = camera.fov * Math.PI / 180;
-          const pxPerUnit = renderer.domElement.height / (2 * dist * Math.tan(fov / 2));
-          const thickness = RING_PX / pxPerUnit;
-          const majorR = VISUAL_RADIUS + thickness * 1.5;
-          const minorR = thickness * 0.5;
-          ring.geometry.dispose();
-          ring.geometry = new THREE.TorusGeometry(majorR, minorR, 8, 64);
-        }
       }
       if (showMoments) {
         /** @type {THREE.ArrowHelper} Moment arrow */
@@ -313,7 +306,48 @@ export function useThreeScene(
         }
       }
     });
-  }, [magnets, selectedIds, activeGroup, groups, showMoments, showForceTorques, ready]);
+  }, [magnets, selectedIds, showMoments, showForceTorques, ready]);
 
-  return { meshesRef, showMoments, showForceTorques, setShowMoments, setShowForceTorques };
+  // 在 useThreeScene 中暴露更新函数，或直接在渲染循环里调用
+  const magnetsRef = useRef(magnets); magnetsRef.current = magnets;
+  const getIdsRef = useRef(getIdsInAffectedGroup); getIdsRef.current = getIdsInAffectedGroup;
+  const updateRings = () => {
+    const rings = ringsRef.current;
+    const transRings = transRingsRef.current;
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    if (!camera || !renderer) return;
+
+    const groupIds = getIdsRef.current();  // 始终读最新
+    // console.log(`白圈: ${magnets.filter((mag, i) => { return groupIds.has(mag.id); })}`);
+    magnetsRef.current.forEach((mag, idx) => {
+      const ring = rings[idx], transRing = transRings[idx];
+      if (!ring) return;
+      const sel = groupIds.has(mag.id);
+      ring.visible = sel; transRing.visible = sel;
+      const origin = mag.pos.clone().multiplyScalar(VISUAL_SCALE);
+      if (!sel) return;
+      ring.position.copy(origin); transRing.position.copy(origin);
+      ring.lookAt(camera.position); transRing.lookAt(camera.position);
+      // 固定像素宽度 → 动态世界宽度
+      const dist = camera.position.distanceTo(origin);
+      const fov = camera.fov * Math.PI / 180;
+      const pxPerUnit = renderer.domElement.height / (2 * dist * Math.tan(fov / 2));
+      const thickness = RING_PX / pxPerUnit;
+      const majorR = VISUAL_RADIUS + thickness * 1.5;
+      const minorR = thickness * 0.5;
+      const prev = ring.userData;
+      if (Math.abs(majorR - (prev.majorR ?? 0)) > majorR * 0.005 ||
+        Math.abs(minorR - (prev.minorR ?? 0)) > minorR * 0.005) {
+        ring.geometry.dispose();
+        ring.geometry = new THREE.TorusGeometry(majorR, minorR, 8, 64);
+        ring.userData.majorR = majorR;
+        ring.userData.minorR = minorR;
+        transRing.geometry.dispose();
+        transRing.geometry = new THREE.TorusGeometry(VISUAL_RADIUS + thickness * 1.2, thickness * 0.2, 8, 64);
+      }
+    })
+  }
+
+  return { meshesRef, showMoments, showForceTorques, updateRings, setShowMoments, setShowForceTorques };
 }
