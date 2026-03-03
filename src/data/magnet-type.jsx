@@ -16,7 +16,7 @@ export function resetMagnetIdCounter() {
  * @property {Vector3} vel    - 线速度，单位 m/s
  * @property {Vector3} moment - 磁矩方向向量（模 = |m|，A·m²；仿真中通常已归一化后由 BuckyBall 缩放）
  * @property {Vector3} omega  - 角速度，单位 rad/s（用于磁矩旋转积分）
- * @property {string}  color  - 用于渲染的颜色字符串（如 '#ff0000' 或 0xff0000）
+ * @property {string}  color  - 用于渲染的颜色字符串（如 '#ff0000'）
  * @property {string}  group  - 可选的分组标签, 可能用于整体移动或旋转
  *
  * **输出字段**（由 MagnetPGSWorld.step() 写入，首帧前可能为 undefined）:
@@ -44,7 +44,7 @@ export function createMagnet(init = {}) {
   };
 }
 
-export function perturbMagnet(mag, magnitude = 0.3) {
+export function perturbMagnet(mag, magnitude = 0.001) { // 默认扰动幅度 1 mm
   const randVec = new Vector3(
     (Math.random() - 0.5) * magnitude,
     (Math.random() - 0.5) * magnitude,

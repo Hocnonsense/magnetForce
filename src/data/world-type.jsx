@@ -23,8 +23,8 @@ export class WorldParams {
     this.damping = p.damping;
     this.friction = p.friction;
     this.rollingFriction = p.rollingFriction;
-    this.mMag = p.br / MU_0;
+    this.magnetization = p.br / MU_0;
     this.inertia = 0.4 * p.mass * p.radius ** 2;
-    this.DIST = p.radius * 2;
+    this.diameter = p.radius * 2;
   }
 }

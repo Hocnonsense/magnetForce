@@ -35,48 +35,48 @@ export class MagnetPGSWorld {
   }
 
   /** 计算磁力（用内部存储的位置和磁矩） */
-  calcMagneticForces(magnets, radius, mMag) {
+  calcMagneticForces(magnets, radius, magnetization) {
     const n = magnets.length;
-    const coforces = magnets.map(() => new Vector3(0, 0, 0));
+    const netForces = magnets.map(() => new Vector3(0, 0, 0));
     const torques = magnets.map(() => new Vector3(0, 0, 0));
     const forces = magnets.map(() => new Map());
     const _d = new Vector3();
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         const ft = calculateMagnet(
-          radius, mMag,
+          radius, magnetization,
           magnets[i].moment, magnets[j].moment,
           _d.copy(magnets[j].pos).sub(magnets[i].pos)
         )
-        coforces[i].add(ft.force1);
-        coforces[j].add(ft.force2);
+        netForces[i].add(ft.force1);
+        netForces[j].add(ft.force2);
         torques[i].add(ft.torque1);
         torques[j].add(ft.torque2);
         forces[i].set(`M#${j}`, ft.force1);
         forces[j].set(`M#${i}`, ft.force2);
       }
     }
-    return { coforces, torques, forces };
+    return { netForces, torques, forces };
   }
 
   /**
    * @param {Magnet[]} magnets
    */
   step(magnets, dt, gravity = false) {
-    const DIST = this.params.radius * 2;
+    const DIST = this.params.diameter;
     const fixedFlags = magnets.map(m => !!m.fixed);
     const magnetPos = magnets.map(m => m.pos);
     // 1. 检测接触
     const fixedPos = fixOverlaps(magnetPos, DIST, this.params.shellThickness, fixedFlags);
     // 2. 计算磁力
-    const { coforces, torques, forces } = this.calcMagneticForces(
+    const { netForces, torques, forces } = this.calcMagneticForces(
       magnets.map((m, i) => ({ pos: fixedPos[i], moment: m.moment })),
-      this.params.radius, this.params.mMag
+      this.params.radius, this.params.magnetization
     );
     // 3. 叠加重力（固定球不受重力影响积分，但支持力会通过约束传递）
     if (gravity) {
       const GRAVITY = this.params.gravity;
-      coforces.forEach((f, i) => {
+      netForces.forEach((f, i) => {
         if (!fixedFlags[i]) {
           const g = GRAVITY * this.params.mass;
           f.y += g;
@@ -87,7 +87,7 @@ export class MagnetPGSWorld {
     // 4. 约束求解（固定球提供支持力）—— 仅法向约束，无切向摩擦
     const contacts = getContacts(fixedPos, DIST + this.params.shellThickness);
     const { constrainedForces, constrainedVel, forceLambda } = solveClusterConstraints(
-      fixedPos, coforces, magnets.map(m => m.vel),
+      fixedPos, netForces, magnets.map(m => m.vel),
       contacts, fixedFlags, this.params.rollingFriction
     );
     // 5. 自适应时间步（固定球跳过积分）

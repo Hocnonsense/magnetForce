@@ -285,7 +285,7 @@ export function solveForceConstraints(
       for (let ci = 0; ci < nc; ci++) {
         _lambda[ci] = lambdaPerContact[ci].fn;
         const F = applyForcesToCForces(bases[ci], lambdaPerContact[ci], isStatic[ci], dynamicFrictionForce[ci]);
-        updataByFixedFlags(cForces, contacts[ci], F, _fixedFlags);
+        updateByFixedFlags(cForces, contacts[ci], F, _fixedFlags);
       }
       return _lambda;
     }
@@ -296,7 +296,7 @@ export function solveForceConstraints(
     for (let ci = 0; ci < nc; ci++) {
       if (isStatic[ci]) continue;
       updateFrictionForce(bases[ci], lambdaPerContact[ci], dynamicFrictionForce[ci], dynamicFricDir[ci], mu, SOFT_TOLERANCE);
-      updataByFixedFlags(workForces, contacts[ci], dynamicFrictionForce[ci], _fixedFlags);
+      updateByFixedFlags(workForces, contacts[ci], dynamicFrictionForce[ci], _fixedFlags);
     }
   }
   // 达到迭代上限：用最后一次的结果（可能不完全满足库仑锥，但足够近似）
@@ -310,7 +310,7 @@ export function solveForceConstraints(
     for (let ci = 0; ci < nc; ci++) {
       _lambda[ci] = lambdaPerContact[ci].fn;
       const F = applyForcesToCForces(bases[ci], lambdaPerContact[ci], isStatic[ci], dynamicFrictionForce[ci]);
-      updataByFixedFlags(cForces, contacts[ci], F, _fixedFlags);
+      updateByFixedFlags(cForces, contacts[ci], F, _fixedFlags);
     }
   }
   return _lambda;
@@ -322,7 +322,7 @@ export function solveForceConstraints(
  * @param {Vector3} contactForces
  * @param {boolean[]} _fixedFlags
  */
-function updataByFixedFlags(forces, contact, contactForces, _fixedFlags) {
+function updateByFixedFlags(forces, contact, contactForces, _fixedFlags) {
   const { i, j } = contact;
   if (!_fixedFlags[i]) { forces[i].add(contactForces); }
   if (!_fixedFlags[j]) { forces[j].sub(contactForces); }
@@ -346,7 +346,7 @@ function mapLambdaToContacts(lambda, eqMap, isStatic) {
  * @param {boolean[]} isStatic - 输入/输出：每个活跃接触的静摩擦状态, 会被原地修改
  */
 function checkCoulombCone(lambdaPerContact, isStatic, mu, tolerance) {
-  let noChang = true;
+  let noChange = true;
   for (let a = 0; a < lambdaPerContact.length; a++) {
     const { fn, ft1, ft2 } = lambdaPerContact[a];
     const ftMag = Math.sqrt(ft1 * ft1 + ft2 * ft2);
@@ -354,13 +354,13 @@ function checkCoulombCone(lambdaPerContact, isStatic, mu, tolerance) {
 
     if (isStatic[a] && ftMag > limit + tolerance) {
       isStatic[a] = false; // 降级为动摩擦
-      noChang = false;
+      noChange = false;
     } else if (!isStatic[a] && ftMag <= limit - tolerance) {
       // 可选：静摩擦恢复（根据物理需求启用）
       // isStatic[a] = true; changed = true;
     }
   }
-  return noChang;
+  return noChange;
 }
 
 /**
@@ -671,7 +671,7 @@ function applyLambda(vectors, contacts, activeIdx, _fixedFlags, lambda, lambdaOu
     const ci = activeIdx[r];
     if (lambdaOut) lambdaOut[ci] = lam;
     if (Math.abs(lam) < SOFT_TOLERANCE) continue;
-    updataByFixedFlags(vectors, contacts[ci], contacts[ci].normal.clone().multiplyScalar(lam), _fixedFlags);
+    updateByFixedFlags(vectors, contacts[ci], contacts[ci].normal.clone().multiplyScalar(lam), _fixedFlags);
   }
 }
 

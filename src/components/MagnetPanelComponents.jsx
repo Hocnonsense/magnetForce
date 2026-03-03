@@ -1,5 +1,5 @@
 import React from 'react';
-import { smallBtnStyle, secStyle, Collapse } from '../styles';
+import { smallBtnStyle, sectionStyle, Collapse } from '../styles';
 
 /** @type {React.CSSProperties} */
 const EDIT_ROW_STYLE = {

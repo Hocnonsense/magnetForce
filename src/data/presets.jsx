@@ -187,7 +187,7 @@ export const PRESETS = {
   chain: () => Array.from({ length: 5 }, (_, i) => ({
     pos: new THREE.Vector3((i - 2) * 2 * 1.1, 0, 0),
     m: new THREE.Vector3(1, 0, 0),
-    color: i % 2 ? 0x4444ff : 0xff4444
+    color: i % 2 ? "#4444ff" : "#ff4444"
   })),
   ring: () => Array.from({ length: 6 }, (_, i) => {
     const a = (2 * Math.PI * i) / 6;
@@ -195,7 +195,7 @@ export const PRESETS = {
     return {
       pos: new THREE.Vector3(ringRadius * Math.cos(a), ringRadius * Math.sin(a), 0),
       m: new THREE.Vector3(Math.cos(a + Math.PI / 2), Math.sin(a + Math.PI / 2), 0),
-      color: i % 2 ? 0x4444ff : 0xff4444
+      color: i % 2 ? "#4444ff" : "#ff4444"
     };
   }),
   random: () => Array.from({ length: 8 }, (_, i) => ({
@@ -206,7 +206,7 @@ export const PRESETS = {
     ),
     //m: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().toArray(),
     m: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(),
-    color: i % 2 ? 0x4444ff : 0xff4444
+    color: i % 2 ? "#4444ff" : "#ff4444"
   })),
   cube: () => {
     const halfSize = 2 * 1.2;
@@ -217,7 +217,7 @@ export const PRESETS = {
     return positions.map((p, i) => ({
       pos: p.multiplyScalar(halfSize),
       m: new THREE.Vector3(0, 0, i < 4 ? 1 : -1),
-      color: i < 4 ? 0xff4444 : 0x4444ff
+      color: i < 4 ? "#ff4444" : "#4444ff"
     }));
   }
 };

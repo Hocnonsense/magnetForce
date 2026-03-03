@@ -11,7 +11,7 @@ import { usePhysicsLoop } from './hooks/usePhysicsLoop';
 import { screenToPhysics, useThreeScene } from './hooks/useThreeScene';
 import { useUndoHistory } from './hooks/useUndoHistory';
 import initMagnetWorld from './physics/world';
-import { lbl, secStyle, smallBtnStyle } from './styles';
+import { labelStyle, sectionStyle, smallBtnStyle } from './styles';
 import { alignGroupByPCA, getCenter } from './utils/coordinates';
 
 // Simulation constants
@@ -23,7 +23,7 @@ export default function MagnetSimulator() {
   const MAGNET_RADIUS = 0.0025; // 5mm diameter
   const VISUAL_RADIUS = MAGNET_RADIUS * VISUAL_SCALE;
 
-  const [magnets, setMagnets] = useState([]);
+  const [magnets, _setMagnets] = useState([]);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [refYId, setRefYId] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -51,10 +51,18 @@ export default function MagnetSimulator() {
   // 最新参数 ref，避免闭包捕获旧值
   const stateRef = useRef({ magnets, isSimulating, simSpeed, useGravity });
   stateRef.current = { magnets, isSimulating, simSpeed, useGravity };
+  const setMagnets = useCallback((update) => {
+    _setMagnets(prev => {
+      const next = typeof update === 'function' ? update(prev) : update;
+      stateRef.current.magnets = next;
+      return next;
+    });
+  }, []);
+
 
   // ── 分组 ──────────────────────────────────────────────────────────────────
   const grouping = useGrouping({ selectedIds, setSelectedIds, keyTrapRef, stateRef });
-  const { activeGroup, groups, setNewGroupName, createGroup, getIdsInAffectedGroup, cleanupIds, setGroups, setActiveGroup, } = grouping;
+  const { activeGroup, groups, setNewGroupName, createGroup, getIdsInActiveGroup, cleanupIds, setGroups, setActiveGroup, } = grouping;
 
   /** @type {React.RefObject<import('./physics/world').MagnetPGSWorld|null>} */
   const magnetWorldRef = useRef(null);
@@ -88,7 +96,7 @@ export default function MagnetSimulator() {
     resetCamera, setCameraView, toggleProjection
   } = useThreeScene(
     { containerRef, sceneRef, cameraRef, rendererRef, controlsRef },
-    { magnets, selectedIds, ready, getIdsInAffectedGroup, keyTrapRef },
+    { magnets, selectedIds, ready, getIdsInActiveGroup, keyTrapRef },
     VISUAL_RADIUS, VISUAL_SCALE, RING_PX);
 
   // ── 物理循环 ──────────────────────────────────────────────────────────────
@@ -109,7 +117,7 @@ export default function MagnetSimulator() {
   // ── 键盘输入捕获 ──────────────────────────────────────────────────────────
   // 点击 3D 区域时不再自动聚焦 keyTrap，仅选择分组时聚焦
   const { handleKeyDown } = useKeyboardNav(
-    { stateRef, cameraRef, rendererRef, setMagnets, needsSyncRef, getIdsInAffectedGroup },
+    { stateRef, cameraRef, rendererRef, setMagnets, needsSyncRef, getIdsInActiveGroup },
     RING_PX, VISUAL_SCALE, MAGNET_RADIUS
   )
 
@@ -166,10 +174,10 @@ export default function MagnetSimulator() {
     const ids = groups[activeGroup];
     const groupMags = magnets.filter(m => ids.has(m.id));
     if (groupMags.length === 0) return;
-    const effIds = getIdsInAffectedGroup();
-    const effMags = magnets.filter(m => effIds.has(m.id));
-    const center = getCenter(effMags.map(m => m.pos));
-    const q = alignGroupByPCA(effMags, selectedIds, center);
+    const activeIds = getIdsInActiveGroup();
+    const activeMags = magnets.filter(m => activeIds.has(m.id));
+    const center = getCenter(activeMags.map(m => m.pos));
+    const q = alignGroupByPCA(activeMags, selectedIds, center);
     if (!q) return;
     setMagnets(prev => {
       const newPos = tryRotate(prev, ids, center, q, MAGNET_RADIUS);
@@ -343,7 +351,7 @@ export default function MagnetSimulator() {
 
   // ── 批量修改 ──────────────────────────────────────────────────────────────
   const batchSet = (field, value) => {
-    const ids = getIdsInAffectedGroup();
+    const ids = getIdsInActiveGroup();
     if (ids.size === 0) return;
     pushUndo(magnets);
     needsSyncRef.current = true;
@@ -359,7 +367,7 @@ export default function MagnetSimulator() {
     </div>
   );
 
-  const effIds = getIdsInAffectedGroup();
+  const activeIds = getIdsInActiveGroup();
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100vh', background: '#08080f', fontFamily: 'system-ui, -apple-system, sans-serif', color: '#e0e0e0' }}>
@@ -424,15 +432,15 @@ export default function MagnetSimulator() {
 
 
         {/* ── 批量修改 ── */}
-        {effIds.size > 1 && (
-          <div style={secStyle}>
-            <div style={lbl}>批量修改 ({effIds.size})</div>
+        {activeIds.size > 1 && (
+          <div style={sectionStyle}>
+            <div style={labelStyle}>批量修改 ({activeIds.size})</div>
             <div style={{ fontSize: '10px', color: '#666', marginBottom: '4px' }}>颜色</div>
             <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '8px' }}>
-              {[0xff4444, 0x4444ff, 0x44ff44, 0xffdd00, 0xff44ff, 0x44ffff, 0xff8800, 0x8844ff].map(c => (
+              {["#ff4444", "#4444ff", "#44ff44", "#ffdd00", "#ff44ff", "#44ffff", "#ff8800", "#8844ff"].map(c => (
                 <button key={c} onClick={() => batchSet('color', c)} style={{
                   width: '22px', height: '22px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer',
-                  background: `#${c.toString(16).padStart(6, '0')}`,
+                  background: c,
                 }} />
               ))}
               <input type="color" onChange={e => batchSet('color', parseInt(e.target.value.slice(1), 16))}
@@ -442,7 +450,7 @@ export default function MagnetSimulator() {
               <button onClick={() => batchSet('vel', new THREE.Vector3())} style={smallBtnStyle}>清零速度</button>
               <button onClick={() => batchSet('omega', new THREE.Vector3())} style={smallBtnStyle}>清零角速度</button>
               <button onClick={() => {
-                const ids = getIdsInAffectedGroup();
+                const ids = getIdsInActiveGroup();
                 needsSyncRef.current = true;
                 setMagnets(prev => prev.map(m => ids.has(m.id) ? { ...m, fixed: !m.fixed } : m));
               }} style={smallBtnStyle}>切换固定</button>
@@ -452,7 +460,7 @@ export default function MagnetSimulator() {
               {[['+X', [1, 0, 0]], ['−X', [-1, 0, 0]], ['+Y', [0, 1, 0]], ['−Y', [0, -1, 0]], ['+Z', [0, 0, 1]], ['−Z', [0, 0, -1]]].map(([label, val]) => (
                 /** @ts-ignore */
                 <button key={label} onClick={() => {
-                  const ids = getIdsInAffectedGroup();
+                  const ids = getIdsInActiveGroup();
                   pushUndo(magnets); needsSyncRef.current = true;
                   const next = magnets.map(m => {
                     if (!ids.has(m.id)) return m;

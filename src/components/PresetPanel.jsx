@@ -1,5 +1,5 @@
 import React from 'react';
-import { chipBtn, presetBtnStyle, smallBtnStyle } from '../styles';
+import { chipButtonStyle, presetBtnStyle, smallBtnStyle } from '../styles';
 
 /**
  * 预设结构面板
@@ -45,7 +45,7 @@ export function PresetPanel({
                     e.stopPropagation();
                     setCustomPresets(prev => { const next = { ...prev }; delete next[name]; return next; });
                   }}
-                  style={{ ...chipBtn, color: '#ff6b6b', cursor: 'pointer' }}
+                  style={{ ...chipButtonStyle, color: '#ff6b6b', cursor: 'pointer' }}
                   title="删除预设"
                 >✕</button>
               </button>

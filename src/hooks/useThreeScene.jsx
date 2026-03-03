@@ -10,7 +10,7 @@ import { reframeCoordinates as _reframeCoordinates } from '../data/magnet-type';
  * @param {THREE.PerspectiveCamera} camera
  */
 export function screenToPhysics(container, camera, clientX, clientY, VISUAL_SCALE) {
-  if (!container || !camera) return [0, 0, 0];
+  if (!container || !camera) return new THREE.Vector3();
   const rect = container.getBoundingClientRect();
   const ndc = new THREE.Vector2(
     ((clientX - rect.left) / rect.width) * 2 - 1,
@@ -44,12 +44,12 @@ export function screenToPhysics(container, camera, clientX, clientY, VISUAL_SCAL
  * @param {Magnet[]} State.magnets,
  * @param {Set<number>} State.selectedIds,
  * @param {boolean} State.ready,
- * @param {Function} State.getIdsInAffectedGroup,
+ * @param {Function} State.getIdsInActiveGroup,
  * @param {React.RefObject<HTMLElement>} State.keyTrapRef,
  */
 export function useThreeScene(
   { containerRef, sceneRef, cameraRef, rendererRef, controlsRef },
-  { magnets, selectedIds, ready, getIdsInAffectedGroup, keyTrapRef },
+  { magnets, selectedIds, ready, getIdsInActiveGroup, keyTrapRef },
   VISUAL_RADIUS, VISUAL_SCALE, RING_PX
 ) {
   const meshesRef = useRef([]);
@@ -125,7 +125,7 @@ export function useThreeScene(
     let height = container.clientHeight || 600;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a15);
+    scene.background = new THREE.Color("#0a0a15");
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
@@ -159,16 +159,16 @@ export function useThreeScene(
     controls.addEventListener('end', onControlsEnd);
 
     // Lights
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    scene.add(new THREE.AmbientLight("#ffffff", 0.5));
+    const dirLight = new THREE.DirectionalLight("#ffffff", 0.8);
     dirLight.position.set(5, 5, 5);
     scene.add(dirLight);
-    const backLight = new THREE.DirectionalLight(0x4466ff, 0.3);
+    const backLight = new THREE.DirectionalLight("#4466ff", 0.3);
     backLight.position.set(-5, -5, -5);
     scene.add(backLight);
 
     // Grid
-    const grid = new THREE.GridHelper(16, 16, 0x333355, 0x222233);
+    const grid = new THREE.GridHelper(16, 16, "#333355", "#222233");
     grid.rotation.x = Math.PI / 2;
     scene.add(grid);
 
@@ -249,7 +249,7 @@ export function useThreeScene(
       // 白圈（Torus，初始不可见）
       const ringGeo = new THREE.TorusGeometry(VISUAL_RADIUS * 1.12, 0.02, 16, 64);
       const ringMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
+        color: "#ffffff",
         depthTest: true,   // ← 必须 true（默认值）
         depthWrite: true,   // ← 必须 true
         transparent: false,
@@ -262,7 +262,7 @@ export function useThreeScene(
       rings.push(ring);
       // 显示在最上层, 半透明
       const transsRingMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.35,
+        color: "#ffffff", transparent: true, opacity: 0.35,
         depthTest: false,
       });
       const transRing = new THREE.Mesh(ringGeo, transsRingMat);
@@ -274,7 +274,7 @@ export function useThreeScene(
       if (showMoments) {
         const arrow = new THREE.ArrowHelper(
           dummyDir, new THREE.Vector3(), VISUAL_RADIUS * 3.6,
-          0xffdd00, VISUAL_RADIUS * 0.5, VISUAL_RADIUS * 0.3
+          "#ffdd00", VISUAL_RADIUS * 0.5, VISUAL_RADIUS * 0.3
         );
         scene.add(arrow);
         arrows.push(arrow);
@@ -284,14 +284,14 @@ export function useThreeScene(
       if (showForceTorques) {
         const fArrow = new THREE.ArrowHelper(
           dummyDir, new THREE.Vector3(), VISUAL_RADIUS,
-          0x00ffff, VISUAL_RADIUS * 0.4, VISUAL_RADIUS * 0.24
+          "#00ffff", VISUAL_RADIUS * 0.4, VISUAL_RADIUS * 0.24
         );
         fArrow.visible = false;
         scene.add(fArrow);
         forceArrows.push(fArrow);
         const tArrow = new THREE.ArrowHelper(
           dummyDir, new THREE.Vector3(), VISUAL_RADIUS,
-          0xff00ff, VISUAL_RADIUS * 0.32, VISUAL_RADIUS * 0.2
+          "#ff00ff", VISUAL_RADIUS * 0.32, VISUAL_RADIUS * 0.2
         );
         tArrow.visible = false;
         scene.add(tArrow);
@@ -377,7 +377,7 @@ export function useThreeScene(
 
   // 在 useThreeScene 中暴露更新函数，或直接在渲染循环里调用
   const magnetsRef = useRef(magnets); magnetsRef.current = magnets;
-  const getIdsRef = useRef(getIdsInAffectedGroup); getIdsRef.current = getIdsInAffectedGroup;
+  const getIdsRef = useRef(getIdsInActiveGroup); getIdsRef.current = getIdsInActiveGroup;
   const updateRings = () => {
     const rings = ringsRef.current;
     const transRings = transRingsRef.current;

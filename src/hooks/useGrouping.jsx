@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
  * @property {(string) => void} selectGroup
  * @property {(string) => void} deleteGroup
  * @property {() => void} confirmRename
- * @property {() => Set<number>} getIdsInAffectedGroup
+ * @property {() => Set<number>} getIdsInActiveGroup
  * @property {(deletedIds: Set<number>) => void} cleanupIds
  */
 
@@ -49,7 +49,7 @@ export function useGrouping({ selectedIds, setSelectedIds, keyTrapRef, stateRef 
   const [newGroupName, setNewGroupName] = useState('');
 
   // ── derived ───────────────────────────────────────────────────────────
-  const getIdsInAffectedGroup = useCallback(() => {
+  const getIdsInActiveGroup = useCallback(() => {
     const ids = new Set();
     if (activeGroup && groups[activeGroup]) {
       for (const id of groups[activeGroup]) ids.add(id);
@@ -140,7 +140,7 @@ export function useGrouping({ selectedIds, setSelectedIds, keyTrapRef, stateRef 
     groups, setGroups,
     activeGroup, setActiveGroup,
     newGroupName, setNewGroupName,
-    getIdsInAffectedGroup,
+    getIdsInActiveGroup: getIdsInActiveGroup,
     createGroup, deleteGroup, selectGroup, confirmRename,
     cleanupIds,
   };

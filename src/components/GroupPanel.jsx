@@ -1,5 +1,5 @@
 import React from 'react';
-import { secStyle, lbl, chipBtn, smallBtnStyle, Collapse } from '../styles';
+import { sectionStyle, labelStyle, chipButtonStyle, smallBtnStyle, Collapse } from '../styles';
 
 /**
  * @typedef {import('../hooks/useGrouping').GroupingState} GroupingState
@@ -34,7 +34,7 @@ export function GroupPanel({
     <Collapse
       label={<div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>分组</div>}
     >
-      <div style={{ gap: '6px', display: 'flex', flexWrap: 'wrap', ...lbl }}>
+      <div style={{ gap: '6px', display: 'flex', flexWrap: 'wrap', ...labelStyle }}>
         {selectedIds.size > 1 && (
           <button onClick={createGroup} style={{ ...smallBtnStyle, color: '#6bd5ff' }}>
             创建分组 (Ctrl+G)
@@ -105,7 +105,7 @@ export function GroupPanel({
               }}
             >
               {name} <span style={{ opacity: 0.5 }}>({ids.size})</span>
-              <button onClick={(e) => { e.stopPropagation(); deleteGroup(name); }} style={{ ...chipBtn, color: '#ff6b6b' }} title="删除组">✕</button>
+              <button onClick={(e) => { e.stopPropagation(); deleteGroup(name); }} style={{ ...chipButtonStyle, color: '#ff6b6b' }} title="删除组">✕</button>
             </span>
           )
         ))}
@@ -119,7 +119,7 @@ export function GroupPanel({
       )}
 
       {/* ── 选择信息行 ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', ...lbl, marginTop: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', ...labelStyle, marginTop: '8px' }}>
         <span>
           {selectedIds.size > 0 ? `Shift+单击多选` : '单击选择'}
           ({selectedIds.size}){activeGroup && ` · 「${activeGroup}」`}
@@ -144,8 +144,8 @@ export function GroupPanel({
       )}
 
       {presetPanel && (
-        <div style={{ alignItems: 'center', gap: '6px', ...lbl, marginTop: '8px' }}>
-          <div style={lbl}>
+        <div style={{ alignItems: 'center', gap: '6px', ...labelStyle, marginTop: '8px' }}>
+          <div style={labelStyle}>
             预设结构
           </div>
           <div className="group-panel-footer">{presetPanel}</div>

@@ -21,29 +21,29 @@ export const presetBtnStyle = {
 };
 
 
-export const secStyle = {
+export const sectionStyle = {
   padding: '10px', background: 'rgba(255,255,255,0.03)',
   borderRadius: '8px',
   border: '1px solid rgba(255,255,255,0.06)'
 };
 
-export const lbl = {
+export const labelStyle = {
   fontSize: '11px',
   color: '#888',
   marginBottom: '6px'
 };
 
-export const chipBtn = {
+export const chipButtonStyle = {
   ...smallBtnStyle,
   padding: '2px',
   fontSize: '8px',
   lineHeight: '1'
 };
 
-export function Collapse({ label, defaultOpen = true, style = secStyle, children }) {
+export function Collapse({ label, defaultOpen = true, style = sectionStyle, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div style={style ?? secStyle}>
+    <div style={style ?? sectionStyle}>
       <div onClick={() => setOpen(v => !v)} style={{ cursor: 'pointer' }}>
         {label}
       </div>

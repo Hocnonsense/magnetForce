@@ -34,7 +34,7 @@ function getCamera3D(camera) {
 }
 
 export function useKeyboardNav(
-  { stateRef, cameraRef, rendererRef, setMagnets, needsSyncRef, getIdsInAffectedGroup },
+  { stateRef, cameraRef, rendererRef, setMagnets, needsSyncRef, getIdsInActiveGroup },
   RING_PX, VISUAL_SCALE, MAGNET_RADIUS
 ) {
   // ── 键盘输入捕获 ──────────────────────────────────────────────────────────
@@ -42,13 +42,13 @@ export function useKeyboardNav(
   const handleKeyDown = useCallback((e) => {
     // 模拟时不允许操作
     if (stateRef.current.isSimulating) return;
-    const effIds = getIdsInAffectedGroup(); if (effIds.size === 0) return;
+    const activeIds = getIdsInActiveGroup(); if (activeIds.size === 0) return;
     /** @type {PerspectiveCamera} */
     const camera = cameraRef.current; if (!camera) return;
     // 相机空间方向
     const { forward, right, up } = getCamera3D(camera);
     /** 选中球的质心（物理坐标） */
-    const center = getCenter(stateRef.current.magnets.filter(m => effIds.has(m.id)).map(m => m.pos));
+    const center = getCenter(stateRef.current.magnets.filter(m => activeIds.has(m.id)).map(m => m.pos));
     /** 白圈世界宽度（物理坐标） */
     const ringW = RING_PX / VISUAL_SCALE / getRingWorldWidth(center, camera, rendererRef.current);
     let delta = null, rotAxis = null;
@@ -67,11 +67,11 @@ export function useKeyboardNav(
     if (delta) {
       e.preventDefault();
       setMagnets(prev => {
-        const newPos = tryMove(prev, effIds, delta, MAGNET_RADIUS);
+        const newPos = tryMove(prev, activeIds, delta, MAGNET_RADIUS);
         if (!newPos) return prev;
         needsSyncRef.current = true;
         return prev.map(m => {
-          if (!effIds.has(m.id)) return m;
+          if (!activeIds.has(m.id)) return m;
           return { ...m, pos: newPos.get(m.id) };
         });
       });
@@ -81,17 +81,17 @@ export function useKeyboardNav(
       const axis = rotAxis;
       const q = new Quaternion().setFromAxisAngle(axis, angle);
       setMagnets(prev => {
-        const newPos = tryRotate(prev, effIds, center, q, MAGNET_RADIUS);
+        const newPos = tryRotate(prev, activeIds, center, q, MAGNET_RADIUS);
         if (!newPos) return prev;
         needsSyncRef.current = true;
         return prev.map(m => {
-          if (!effIds.has(m.id)) return m;
+          if (!activeIds.has(m.id)) return m;
           const newM = newPos.get(m.id);
           return { ...m, pos: newM.pos, moment: newM.moment };
         });
       });
     }
-  }, [getIdsInAffectedGroup, MAGNET_RADIUS]);
+  }, [getIdsInActiveGroup, MAGNET_RADIUS]);
 
   return { handleKeyDown };
 }
