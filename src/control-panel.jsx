@@ -447,6 +447,14 @@ export default function MagnetSimulator() {
               editDraft={editDraft}
               setEditDraft={setEditDraft}
               onCommit={commitEdit}
+              currentColor={magnets.find(m => m.id === selectedId)?.color}
+              onColorChange={(color) => {
+                pushUndo(magnets);
+                const next = magnets.map(m => m.id === selectedId ? { ...m, color } : m);
+                pushUndo(next); histIdxRef.current = -1;
+                needsSyncRef.current = true;
+                setMagnets(next);
+              }}
             />
           )}
           {/* ── 批量修改 ── */}

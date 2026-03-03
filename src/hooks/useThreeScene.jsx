@@ -328,6 +328,7 @@ export function useThreeScene(
       if (mesh) {
         mesh.position.copy(origin);
         mesh.material.emissiveIntensity = selectedIds.has(mag.id) ? 0.4 : 0.15;
+        mesh.material.emissive.set(mag.color);
       }
       if (showMoments) {
         /** @type {THREE.ArrowHelper} Moment arrow */

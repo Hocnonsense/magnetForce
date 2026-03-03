@@ -44,6 +44,51 @@ function EditRow({ field, label, color, editable, draft, setDraft, onCommit }) {
   );
 }
 
+// ── 预设颜色 ──────────────────────────────────────────────────────────────────
+const PRESET_COLORS = [
+  '#ff4444', '#4444ff', '#44ff44', '#ffdd00',
+  '#ff44ff', '#44ffff', '#ff8800', '#8844ff',
+];
+
+/**
+ * 颜色选择器：预设色块 + 自定义取色器
+ *
+ * 颜色统一使用 CSS 字符串格式 ('#rrggbb')。
+ *
+ * @param {Object} props
+ * @param {string} [props.currentColor] - 当前颜色（高亮显示）
+ * @param {(color: string) => void} props.onChange
+ */
+export function ColorPicker({ currentColor, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+      {PRESET_COLORS.map(c => (
+        <button
+          key={c}
+          onClick={() => onChange(c)}
+          style={{
+            width: '22px', height: '22px', borderRadius: '4px',
+            border: c === currentColor
+              ? '2px solid #fff'
+              : '1px solid rgba(255,255,255,0.2)',
+            cursor: 'pointer',
+            background: c,
+          }}
+        />
+      ))}
+      <input
+        type="color"
+        value={typeof currentColor === 'string' ? currentColor : '#93b5c9'}
+        onChange={e => onChange(e.target.value)}
+        style={{
+          width: '22px', height: '22px', padding: 0,
+          border: 'none', borderRadius: '4px', cursor: 'pointer',
+        }}
+      />
+    </div>
+  );
+}
+
 /**
  * 模拟控制面板：播放/暂停、速度、重置、扰动、时间信息
  *
@@ -184,16 +229,39 @@ export function SelectedMagnetsPanel({
   )
 }
 
+/**
+ * 单选磁球编辑面板：位置/速度/磁矩编辑 + 颜色选择
+ *
+ * @param {Object} props
+ * @param {boolean} props.isSimulating
+ * @param {Object} props.editDraft
+ * @param {Function} props.setEditDraft
+ * @param {(field: string, index: number, value: string) => void} props.onCommit
+ * @param {string} [props.currentColor] - 当前磁球颜色
+ * @param {(color: string) => void} [props.onColorChange] - 颜色变更回调
+ */
 export function SelectedMagnetPanel({
   isSimulating, editDraft, setEditDraft, onCommit,
+  currentColor, onColorChange,
 }) {
   const rowProps = { draft: editDraft, setDraft: setEditDraft, onCommit };
   return (
     <>
       <div style={{ fontSize: '11px', color: '#666', marginBottom: '6px' }}>
         {isSimulating ? '数据' : '编辑数据'}
-        <span style={{ color: '#444', fontStyle: 'italic' }}>{isSimulating ? '' : '(回车确认 · ctrl + z 撤销)'}</span>
+        <span style={{ color: '#444', fontStyle: 'italic' }}>
+          {isSimulating ? '' : '(回车确认 · ctrl + z 撤销)'}
+        </span>
       </div>
+
+      {/* 颜色 */}
+      {onColorChange && (
+        <div style={{ marginBottom: '8px' }}>
+          <div style={{ fontSize: '10px', color: '#666', marginBottom: '4px' }}>颜色</div>
+          <ColorPicker currentColor={currentColor} onChange={onColorChange} />
+        </div>
+      )}
+
       {editDraft && (
         <>
           <EditRow field="m_pos" label="位置 (mm)" color="#88ccff" editable={!isSimulating} {...rowProps} />
