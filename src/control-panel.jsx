@@ -82,7 +82,11 @@ export default function MagnetSimulator() {
     },
   });
 
-  const { meshesRef, showMoments, showForceTorques, updateRings, setShowMoments, setShowForceTorques } = useThreeScene(
+  const {
+    meshesRef, showMoments, showForceTorques,
+    updateRings, setShowMoments, setShowForceTorques,
+    resetCamera, setCameraView, toggleProjection
+  } = useThreeScene(
     { containerRef, sceneRef, cameraRef, rendererRef, controlsRef },
     { magnets, selectedIds, ready, getIdsInAffectedGroup, keyTrapRef },
     VISUAL_RADIUS, VISUAL_SCALE, RING_PX);
@@ -400,6 +404,15 @@ export default function MagnetSimulator() {
           </div>
         </SimSection>
 
+        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+          <button onClick={() => setCameraView('x')} style={smallBtnStyle}>YZ面</button>
+          <button onClick={() => setCameraView('y')} style={smallBtnStyle}>XZ面</button>
+          <button onClick={() => setCameraView('z')} style={smallBtnStyle}>XY面</button>
+          <button onClick={toggleProjection} style={smallBtnStyle}>
+            {cameraRef.current?.isPerspectiveCamera ? '正交' : '透视'}
+          </button>
+          <button onClick={resetCamera} style={smallBtnStyle}>重置相机</button>
+        </div>
 
         {/* Selected & Grouping Magnet Controls */}
         <GroupPanel

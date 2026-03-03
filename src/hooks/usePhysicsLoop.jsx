@@ -135,7 +135,7 @@ export function usePhysicsLoop(magnetWorldRef,
       }
       controls?.update();
       onBeforeRender?.();   // ← 每帧调用
-      renderer.render(scene, camera);
+      renderer.render(scene, cameraRef.current);
       //setIsSimulating(false); // 物理步完成后重置 simulating 状态，等待下一次触发
     };
 

@@ -61,6 +61,61 @@ export function useThreeScene(
   const [showMoments, setShowMoments] = useState(true);
   const [showForceTorques, setShowForceTorques] = useState(true);
 
+  const resetCamera = useCallback(() => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    camera.position.set(0, 0, 12);
+    camera.up.set(0, 1, 0);
+    camera.fov = 50;
+    camera.updateProjectionMatrix();
+    controls.target.set(0, 0, 0);
+    controls.update();
+  }, []);
+
+  const setCameraView = useCallback((axis) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    const dist = camera.position.distanceTo(controls.target);
+    const pos = controls.target.clone();
+    if (axis === 'x') { pos.x += dist; camera.up.set(0, 1, 0); }
+    if (axis === 'y') { pos.y += dist; camera.up.set(0, 0, -1); }
+    if (axis === 'z') { pos.z += dist; camera.up.set(0, 1, 0); }
+    camera.position.copy(pos);
+    controls.update();
+  }, []);
+
+  const toggleProjection = useCallback(() => {
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    if (!camera || !renderer) return;
+    if (camera.isPerspectiveCamera) {
+      const dist = camera.position.distanceTo(controlsRef.current.target);
+      const halfH = dist * Math.tan((camera.fov * Math.PI / 180) / 2);
+      const aspect = camera.aspect;
+      const ortho = new THREE.OrthographicCamera(
+        -halfH * aspect, halfH * aspect, halfH, -halfH, 0.01, 1000
+      );
+      ortho.position.copy(camera.position);
+      ortho.quaternion.copy(camera.quaternion);
+      cameraRef.current = ortho;
+      controlsRef.current.object = ortho;
+    } else {
+      const halfH = (camera.top - camera.bottom) / 2;
+      const dist = camera.position.distanceTo(controlsRef.current.target);
+      const fov = 2 * Math.atan(halfH / dist) * 180 / Math.PI;
+      const persp = new THREE.PerspectiveCamera(
+        fov, camera.right / camera.top, 0.01, 1000
+      );
+      persp.position.copy(camera.position);
+      persp.quaternion.copy(camera.quaternion);
+      cameraRef.current = persp;
+      controlsRef.current.object = persp;
+    }
+    controlsRef.current.update();
+  }, []);
+
   // ── Three.js 初始化 ────────────────────────────────────────────────────────
   useEffect(() => {
     const container = containerRef.current;
@@ -74,7 +129,6 @@ export function useThreeScene(
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
-    camera.position.set(0, 0, 12);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -93,6 +147,8 @@ export function useThreeScene(
     controls.minDistance = 2;
     controls.maxDistance = 50;
     controlsRef.current = controls;
+
+    resetCamera();
 
     // 视角操作结束后，重新聚焦键盘捕获区（避免旋转视角后丢焦点）
     const onControlsEnd = () => {
@@ -349,5 +405,5 @@ export function useThreeScene(
     })
   }
 
-  return { meshesRef, showMoments, showForceTorques, updateRings, setShowMoments, setShowForceTorques };
+  return { meshesRef, showMoments, showForceTorques, updateRings, setShowMoments, setShowForceTorques, resetCamera, setCameraView, toggleProjection };
 }
